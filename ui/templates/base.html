@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{ theme.active_name }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ app_name }}{% endblock %} // {{ app_name }}</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+:root{
+  --bg:{{ theme.bg }}; --panel:{{ theme.panel }}; --fg:{{ theme.fg }};
+  --muted:{{ theme.muted }}; --accent:{{ theme.accent }}; --warn:{{ theme.warn }};
+  --danger:{{ theme.danger }}; --border:{{ theme.border }}; --sel:{{ theme.sel }};
+}
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip" href="#main">skip to content [tab]</a>
+<header class="topbar">
+  <div class="wrap bar-in">
+    <a class="logo" href="/" accesskey="h" title="home (g h)">$ {{ app_name }}<span class="blink">_</span></a>
+    <nav class="nav" aria-label="primary">
+      <a href="/" data-nav="home">[home]</a>
+      <a href="/playlists" data-nav="playlists">[playlists]</a>
+      <a href="/audios" data-nav="audios">[audios]</a>
+      <a href="/download" data-nav="download">[+get]</a>
+      <a href="/help" data-nav="help">[?help]</a>
+    </nav>
+    <div class="bar-right">
+      <input id="global-search" class="cli" type="text" placeholder="$ search...  ( / to focus )"
+             value="{{ q|default('') }}" autocomplete="off" spellcheck="false"
+             data-home-target="/">
+      <select id="theme-select" class="cli" title="theme (t cycles)">
+        {% for t in themes %}
+        <option value="{{ t.name }}" {% if t.name==theme.active_name %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+      <button id="theme-manage" class="btn" title="manage themes">~</button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  {% block content %}{% endblock %}
+  <footer class="foot">
+    <span>{{ tagline }}</span><span class="sep">::</span>
+    <span>press <kbd>?</kbd> for help</span><span class="sep">::</span>
+    <span>everything is keyboard reachable</span>
+  </footer>
+</main>
+
+<!-- help modal -->
+<div id="help-modal" class="modal" hidden role="dialog" aria-label="help">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ help -- keyboard + search</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <pre class="help-pre">GLOBAL
+  /           focus search        ? (shift+/)  this help
+  g h/p/a/d   go home/playlists/audios/download
+  t           cycle theme         esc          close dialog / blur
+PLAYER (playlist + audio pages)
+  space/k     play-pause          j/l  -10s/+10s      arrows  seek/volume
+  n/p         next/prev track     m    mute           [/] speed -/+
+  s/S         local mix (temp) / saved mix (server)   o/O song-loop / list-loop
+  z           sleep timer (or pick/custom minutes in the box)
+  drag queue tracks to reorder (alt+arrows too) · w saves order to server
+  speed/sleep boxes: presets or custom… values (tab in, type, set)
+  0-9         jump to queue index (playlist)
+LISTS
+  j/k or arrows move between cards, enter opens, e edits (on detail)
+  r rolls a random cover preview, u keeps it (playlist + track pages)</pre>
+      <pre class="help-pre">SEARCH GRAMMAR  (playlists + audios)
+  hello world              plain: match across title/artist/desc/tags
+  @tags a ; b ; @noti c    only tags a+b, exclude c
+  @title some words         title contains (then partial words)
+  @desc some words          description contains
+  @songs a ; b             playlist has tracks matching a,b (audio: title)
+  @artis a ; b             playlist has artists a,b (audio: artist field)
+  @hash ab12cd             jump by id hash
+  combine: @tags chill ; @noti noisy @artis nina
+  filters on /playlists: sort=name|recent|songs|duration, min/max songs + runtime</pre>
+      <p><a href="/help">[open full /help page]</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- theme modal -->
+<div id="theme-modal" class="modal" hidden role="dialog" aria-label="themes">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ themes -- server stored</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <div id="theme-list" class="theme-list"></div>
+      <h3>$ new theme</h3>
+      <form id="theme-form" class="form-grid">
+        <label>name <input name="name" class="cli" required maxlength="40" placeholder="my-term"></label>
+        <div class="color-grid">
+          <label>bg <input type="color" name="bg" value="#0b0e11"></label>
+          <label>panel <input type="color" name="panel" value="#11151b"></label>
+          <label>fg <input type="color" name="fg" value="#c9d4d8"></label>
+          <label>muted <input type="color" name="muted" value="#6b7885"></label>
+          <label>accent <input type="color" name="accent" value="#46c8a6"></label>
+          <label>warn <input type="color" name="warn" value="#ffbd2e"></label>
+          <label>danger <input type="color" name="danger" value="#ff5f56"></label>
+          <label>border <input type="color" name="border" value="#232b33"></label>
+          <label>sel <input type="color" name="sel" value="#1a2b26"></label>
+        </div>
+        <button class="btn primary" type="submit">save theme [enter]</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script>window.__ACTIVE_THEME__ = "{{ theme.active_name }}";</script>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

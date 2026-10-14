@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}{{ track.title }}{% endblock %}
+{% block content %}
+<section class="detail">
+  <aside class="side">
+    {% if track.thumb_url %}<img id="au-thumb" src="{{ track.thumb_url }}" alt="cover">{% endif %}
+    <h1>{{ track.title }}</h1>
+    <div class="kv">artist <b>{{ track.artist }}</b> · <b>{{ track.duration }}</b> · {{ track.plays }} plays</div>
+    <div class="kv">id <b>#{{ track.id }}</b></div>
+    <div class="kv">{{ raw.description or "-- no description --" }}</div>
+    <div class="tags">{% for t in track.tags %}<b>#</b>{{ t }} {% endfor %}</div>
+    <div class="row-actions" style="margin-top:8px">
+      <button class="btn" id="edit-toggle">edit [e]</button>
+      <button class="btn" id="thumb-random">cover:preview [r]</button>
+      <button class="btn primary" id="thumb-keep" hidden>keep this cover [u]</button>
+      <a class="btn" href="{{ track.stream_url }}" download>dl [d]</a>
+    </div>
+    <div class="hint" id="thumb-note" hidden>$ preview — [r] rolls again, [u] keeps it. nothing saved yet.</div>
+    <form id="edit-form" class="form-grid" hidden style="margin-top:10px">
+      <label>title <input name="title" class="cli" value="{{ track.title }}"></label>
+      <label>artist <input name="artist" class="cli" value="{{ track.artist }}"></label>
+      <label>description <textarea name="description" class="cli">{{ raw.description }}</textarea></label>
+      <label>tags <input name="tags" class="cli" value="{{ track.tags|join(' ; ') }}"></label>
+      <label>cover upload <input type="file" name="thumb" accept="image/*"></label>
+      <div><button class="btn primary" type="submit">save [enter]</button></div>
+    </form>
+    <div style="margin-top:10px">
+      <h3 style="font-size:12px;color:var(--muted)">$ add to playlist</h3>
+      <form id="pl-form" class="inline-form">
+        <input id="pl-q" class="cli" style="flex:1" placeholder="playlist name or #hash">
+        <button class="btn" type="submit">search</button>
+      </form>
+      <div id="pl-results" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div class="danger-zone">
+      <button class="btn danger" id="au-del">delete track [D]</button>
+      <div class="hint">removes file from disk + all playlists.</div>
+    </div>
+  </aside>
+  <div>
+    <div class="player">
+      <div class="now">
+        <div class="now-meta">
+          <span class="prompt">▶</span>
+          <div class="grow"><div class="t" id="now-title">--</div><div class="a" id="now-artist">--</div></div>
+          <div class="now-count" id="now-count" title="queue position">--/--</div>
+        </div>
+        <div class="hint" id="now-desc"></div>
+      </div>
+      <audio id="audio" preload="metadata"></audio>
+      <div class="seek-row"><span id="t-cur">0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="seek"><span id="t-dur">--:--</span></div>
+      <div class="transport">
+        <button class="btn primary" id="btn-play" title="play/pause [space]">play ▶ [space]</button>
+      </div>
+      <div class="toggles">
+        <button class="btn" id="btn-shuffle" hidden></button>
+        <button class="btn" id="btn-loop" title="repeat this song [o]">loop-song [o]:off</button>
+        <input id="loop-n-song" class="cli" type="number" min="1" max="99" value="2" title="song loop count" hidden>
+        <input id="loop-n" class="cli" type="number" min="1" max="99" value="2" hidden>
+        <button class="btn" id="btn-mute" title="mute [m]">mute [m]</button>
+      </div>
+      <div class="p-grid">
+        <div class="p-cell">
+          <span class="p-label">volume</span>
+          <div class="p-inline"><input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="volume"><span class="p-val" id="vol-val">100%</span></div>
+        </div>
+        <div class="p-cell">
+          <span class="p-label">speed <span class="hint">([ ] to step)</span></span>
+          <div class="p-inline">
+            <select id="speed" class="cli" aria-label="speed preset">
+              {% for s in ["0.5","0.75","1","1.25","1.5","1.75","2"] %}
+              <option value="{{ s }}" {% if s=="1" %}selected{% endif %}>{{ s }}x</option>{% endfor %}
+              <option value="custom">custom…</option>
+            </select>
+            <input id="speed-custom" class="cli" type="number" min="0.25" max="3" step="0.05" value="1" aria-label="custom speed" hidden>
+            <button class="btn" id="speed-set" hidden>set</button>
+          </div>
+        </div>
+        <div class="p-cell">
+          <span class="p-label">sleep timer <span class="hint">(z to cycle)</span></span>
+          <div class="p-inline">
+            <select id="sleep" class="cli" aria-label="sleep preset">
+              <option value="0">off</option><option value="15">15m</option>
+              <option value="30">30m</option><option value="45">45m</option>
+              <option value="60">60m</option><option value="90">90m</option>
+              <option value="120">120m</option><option value="custom">custom…</option>
+            </select>
+            <input id="sleep-custom" class="cli" type="number" min="1" max="480" step="1" placeholder="min" aria-label="custom sleep minutes" hidden>
+            <button class="btn" id="sleep-set" hidden>set</button>
+            <span class="hint" id="sleep-left"></span>
+          </div>
+        </div>
+      </div>
+      <div class="p-status" id="p-status">$ idle</div>
+      <div class="queue" id="queue" hidden></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>more ~/audios</h2><span class="right"><a href="/audios">[all]</a></span></div>
+  <div class="grid">
+    {% for t in others %}
+    <article class="card">
+      {% if t.thumb_url %}<a href="{{ t.page_url }}"><img class="thumb" src="{{ t.thumb_url }}" alt="" loading="lazy"></a>{% endif %}
+      <div class="card-body"><div class="card-title"><a href="{{ t.page_url }}">{{ t.title }}</a></div>
+      <div class="meta">{{ t.artist }} · {{ t.duration }}</div></div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/player.js"></script>
+<script>
+(function(){
+  const AID = "{{ track.id }}";
+  const tracks = [{{ track|tojson }}];
+  window.apPlayer({ audio: document.getElementById("audio"), tracks, startIndex: 0 });
+  const ef = document.getElementById("edit-form");
+  const toggleEdit = () => { ef.hidden = !ef.hidden; if (!ef.hidden) ef.querySelector("input").focus(); };
+  document.getElementById("edit-toggle").onclick = toggleEdit;
+  ef.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(ef);
+    await window.apApi("/api/audios/" + AID, { method: "PATCH", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ title: fd.get("title"), artist: fd.get("artist"), description: fd.get("description"), tags: fd.get("tags") }) });
+    const f = fd.get("thumb");
+    if (f && f.size) {
+      const m = new FormData(); m.append("thumb", f);
+      await fetch("/api/audios/" + AID + "/thumbnail/upload", { method: "POST", body: m });
+    }
+    location.reload();
+  };
+  // cover preview-then-keep: roll randoms, keep the one you like
+  let previewPath = null;
+  const seenPreviews = [];
+  const coverImg = document.getElementById("au-thumb");
+  const keepBtn = document.getElementById("thumb-keep");
+  const noteEl = document.getElementById("thumb-note");
+  document.getElementById("thumb-random").onclick = async () => {
+    try {
+      const d = await window.apApi("/api/preview-thumbnail", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: "{}" });
+      previewPath = d.thumb_path;
+      seenPreviews.push(d.thumb_path);
+      if (coverImg) coverImg.src = d.thumb_url;
+      keepBtn.hidden = false;
+      noteEl.hidden = false;
+      window.apToast("preview #" + seenPreviews.length + " — [r] again, [u] keep");
+    } catch (err) { window.apToast("preview failed: " + err.message); }
+  };
+  keepBtn.onclick = async () => {
+    if (!previewPath) return;
+    try {
+      await window.apApi("/api/audios/" + AID, { method: "PATCH",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ thumb_path: previewPath }) });
+      await window.apApi("/api/preview-cleanup", { method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ paths: seenPreviews.filter((p) => p !== previewPath) }) });
+      location.reload();
+    } catch (err) { window.apToast("keep failed: " + err.message); }
+  };
+  document.getElementById("au-del").onclick = async () => {
+    if (!confirm("delete this track?")) return;
+    await window.apApi("/api/audios/" + AID, { method: "DELETE" });
+    location.href = "/audios";
+  };
+  document.getElementById("pl-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const q = document.getElementById("pl-q").value.trim();
+    const box = document.getElementById("pl-results");
+    box.innerHTML = "<span class='hint'>$ searching…</span>";
+    const d = await window.apApi("/api/playlists?q=" + encodeURIComponent(q));
+    box.innerHTML = d.results.length ? "" : "<span class='hint'>no match</span>";
+    d.results.slice(0, 8).forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "q-item";
+      row.innerHTML = "<span class='tt'></span><span class='d'>" + p.count + " tracks</span>";
+      row.querySelector(".tt").textContent = p.title + "  #" + p.id;
+      const add = document.createElement("button");
+      add.className = "btn"; add.textContent = "add";
+      add.onclick = async () => {
+        await window.apApi("/api/playlists/" + p.id + "/add", { method: "POST",
+          headers: {"Content-Type":"application/json"}, body: JSON.stringify({ audio_id: AID }) });
+        window.apToast("added to " + p.title);
+      };
+      row.appendChild(add); box.appendChild(row);
+    });
+  };
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement||{}).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (e.key === "e") toggleEdit();
+    if (e.key === "r") document.getElementById("thumb-random").click();
+    if (e.key === "u" && !document.getElementById("thumb-keep").hidden) document.getElementById("thumb-keep").click();
+  });
+})();
+</script>
+{% endblock %}

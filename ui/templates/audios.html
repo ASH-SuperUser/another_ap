@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}audios{% endblock %}
+{% block content %}
+<section class="sec">
+  <div class="sec-head"><h2>audios ~/all</h2><span class="right">{{ audios|length }} shown · <kbd>/</kbd> search · <a href="/download">[+get]</a></span></div>
+  <form class="filters" method="get" action="/audios">
+    <label style="flex:1;min-width:220px">query
+      <input name="q" class="cli" value="{{ q }}" data-search="/audios" placeholder="@tags a ; b · @artis name · @title words · plain text">
+    </label>
+    <label>sort
+      <select name="sort" class="cli">
+        {% for v in ["recent","name","duration","plays"] %}
+        <option value="{{ v }}" {% if sort==v %}selected{% endif %}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>order
+      <select name="order" class="cli">
+        <option value="desc" {% if order=="desc" %}selected{% endif %}>desc</option>
+        <option value="asc" {% if order=="asc" %}selected{% endif %}>asc</option>
+      </select>
+    </label>
+    <button class="btn primary" type="submit">filter [enter]</button>
+  </form>
+  <p class="hint">same grammar as playlists, but <kbd>@artis/@artist</kbd> matches the track artist and <kbd>@songs</kbd> matches the track title. full guide: <kbd>?</kbd></p>
+  {% if audios %}
+    {% for t in audios %}
+    <div class="trow">
+      {% if t.thumb_url %}<a href="{{ t.page_url }}"><img src="{{ t.thumb_url }}" alt="" loading="lazy"></a>{% endif %}
+      <div class="grow">
+        <div class="tt"><a href="{{ t.page_url }}">{{ t.title }}</a></div>
+        <div class="meta">{{ t.artist }} · {{ t.duration }} · {{ t.plays }} plays · #{{ t.id }}</div>
+        {% if t.tags %}<div class="tags">{% for x in t.tags %}<b>#</b>{{ x }} {% endfor %}</div>{% endif %}
+      </div>
+      <div class="row-actions"><a class="btn" href="{{ t.page_url }}">open</a>
+        <button class="btn danger" data-del="{{ t.id }}">del</button></div>
+    </div>
+    {% endfor %}
+  {% else %}<div class="empty">$ no tracks match. <a href="/download">[+get audio]</a>.</div>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll("[data-del]").forEach((b) => {
+  b.onclick = async () => {
+    if (!confirm("delete track " + b.dataset.del + "? file is removed from disk.")) return;
+    try { await window.apApi("/api/audios/" + b.dataset.del, { method: "DELETE" }); location.reload(); }
+    catch (err) { window.apToast("delete failed: " + err.message); }
+  };
+});
+</script>
+{% endblock %}

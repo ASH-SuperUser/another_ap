@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}help{% endblock %}
+{% block content %}
+<section class="sec">
+  <div class="sec-head"><h2>help ~/manual</h2><span class="right">press <kbd>?</kbd> anywhere for the cheat modal</span></div>
+  <h3>$ keyboard</h3>
+  <pre class="help-pre">GLOBAL
+  /                 focus search (enter runs it, esc blurs)
+  ?  (shift+/)      this help, anywhere
+  g then h/p/a/d    go home / playlists / audios / download
+  t                 cycle theme (server remembers last selected)
+  esc               close dialog / blur field
+  tab / shift+tab   move through everything (all controls are native)
+  arrows            move between cards on listing pages
+
+PLAYER  (playlist page + audio page)
+  space or k        play / pause
+  j / l             seek -10s / +10s        arrows  seek ±5s / volume ±5%
+  n / p             next / previous track (playlist only)
+  m                 mute                    [ / ]   speed down / up
+  s                 local mix (temporary shuffle, server untouched)
+  S                 saved mix (permanent shuffle, stored on server)
+  o                 song loop: off → ∞ forever → Nx total plays (own count box)
+                  1x (play once) is off — no repeat
+  O  (shift+o)      playlist loop: off → ∞ forever → Nx passes (N box)
+                  + with a mix on, every loop pass deals a FRESH shuffle
+                    (local stays local, saved mix re-saves to server)
+  drag tracks ↕     reorder queue (alt+↑/↓ on a focused track works too)
+  w                 save current order to server (button appears when unsaved)
+  z                 sleep timer: off → 15 → 30 → 45 → 60 → off
+  speed / sleep     presets in the boxes, or pick custom… and type any
+                  value (speed 0.25–3x, sleep 1–480 min), then set [enter]
+  0-9               jump to queue position (playlist)
+  w                 persist current queue order to server
+  e / r / u / D         edit details / preview random covers / keep preview / delete
+  i                 (on +get) peek youtube metadata before downloading</pre>
+  <h3>$ search grammar</h3>
+  <pre class="help-pre">PLAIN
+  hello world                 every word must appear somewhere
+                              (title, artist, description, tags, id)
+
+DIRECTIVES (combine freely; all must match = AND)
+  @tags a ; b ; @noti c ; d  tags exactly a+b, excluding c+d
+                              ^-- ';' separates tags, '@noti' = NOT
+  @title some words           title contains the whole string first,
+                              then falls back to word-partial matches
+  @desc some words            same, but in description
+  @songs a ; b                PLAYLISTS: member track titles contain a,b
+                              AUDIOS:    track title contains a,b
+  @artis a ; b   (@artist/@author aliases)
+                              PLAYLISTS: member artists contain a,b
+                              AUDIOS:    artist field contains a,b
+  @hash ab12cd                id/hash contains string (exact jump)
+  @noti words                 stray exclusion: drops title/desc matches
+
+EXAMPLES
+  @tags chill ; night ; @noti noisy
+  @title midnight run @noti demo
+  @songs neon ; @artis nina ; @tags synth
+  @hash 3fa9c1
+
+FILTERS (/playlists page)
+  sort=name|recent|songs|duration   order=asc|desc
+  (min/max songs + min/max runtime also accepted by the API)</pre>
+  <h3>$ themes</h3>
+  <pre class="help-pre">HEADER: [select] switches theme, [~] manages themes.
+  themes live on the server (shared across the LAN), last-selected is
+  remembered per browser. builtins (dark/light/amber, marked *) cannot
+  be deleted. custom themes need all 9 #hex colors.</pre>
+  <h3>$ data + portability</h3>
+  <pre class="help-pre">everything lives in data/  (audio/ + thumbs/ + main_db.db [duckdb]).
+  copy the repo + data/ to move servers. config.py sets HOST/PORT
+  (default 127.0.0.1:5050). run via scripts/run.sh | run.bat | run.py.
+  streaming uses http Range requests, so seeking works in every browser.</pre>
+</section>
+{% endblock %}

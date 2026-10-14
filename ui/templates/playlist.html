@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}{{ pl.title }}{% endblock %}
+{% block content %}
+<section class="detail">
+  <aside class="side">
+    {% if pl.thumb_url %}<img id="pl-thumb" src="{{ pl.thumb_url }}" alt="playlist cover">{% endif %}
+    <h1 id="pl-title">{{ pl.title }}</h1>
+    <div class="kv">id <b>#{{ pl.id }}</b> · <b>{{ pl.count }}</b> tracks · <b>{{ pl.total }}</b></div>
+    <div class="kv" id="pl-desc">{{ pl.description or "-- no description --" }}</div>
+    <div class="tags" id="pl-tags">{% for t in pl.tags %}<b>#</b>{{ t }} {% endfor %}</div>
+    <div style="margin-top:12px">
+      <h3 style="font-size:14px;color:var(--muted);margin:0 0 6px">$ add track</h3>
+      <form id="add-form" class="inline-form">
+        <input id="add-q" class="cli" style="flex:1" placeholder="search audios… (id or words)">
+        <button class="btn" type="submit">search</button>
+      </form>
+      <div id="add-results" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+    <h3 style="font-size:14px;color:var(--muted);margin:0 0 6px">$ manage</h3>
+    <div class="row-actions" style="margin-top:8px">
+      <button class="btn" id="edit-toggle">edit [e]</button>
+      <button class="btn" id="thumb-random">cover:preview [r]</button>
+      <button class="btn primary" id="thumb-keep" hidden>keep this cover [u]</button>
+    </div>
+    <div class="hint" id="thumb-note" hidden>$ preview — [r] rolls again, [u] keeps it. nothing saved yet.</div>
+    <form id="edit-form" class="form-grid" hidden style="margin-top:10px">
+      <label>title <input name="title" class="cli" value="{{ pl.title }}"></label>
+      <label>description <textarea name="description" class="cli">{{ pl.description }}</textarea></label>
+      <label>tags <input name="tags" class="cli" value="{{ pl.tags|join(' ; ') }}"></label>
+      <label>cover upload <input type="file" name="thumb" accept="image/*"></label>
+      <div><button class="btn primary" type="submit">save [enter]</button></div>
+    </form>
+    <div class="danger-zone">
+      <button class="btn danger" id="pl-del">delete playlist [D]</button>
+      <div class="hint">tracks stay in library.</div>
+    </div>
+    </div>
+  </aside>
+
+  <div>
+    <div class="player">
+      <div class="now">
+        <div class="now-meta">
+          <span class="prompt">▶</span>
+          <div class="grow"><div class="t" id="now-title">--</div><div class="a" id="now-artist">--</div></div>
+          <div class="now-count" id="now-count" title="queue position">--/--</div>
+        </div>
+        <div class="hint" id="now-desc"></div>
+      </div>
+      <audio id="audio" preload="metadata"></audio>
+      <div class="seek-row"><span id="t-cur">0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="seek"><span id="t-dur">--:--</span></div>
+      <div class="transport">
+        <button class="btn" id="btn-prev" title="prev [p]">⏮ prev</button>
+        <button class="btn primary" id="btn-play" title="play/pause [space]">play ▶ [space]</button>
+        <button class="btn" id="btn-next" title="next [n]">next ⏭</button>
+      </div>
+      <div class="toggles">
+        <button class="btn" id="btn-shuffle" title="temporary local mix [s]">mix~local [s]</button>
+        <button class="btn" id="btn-shuffle-srv" title="permanent mix, saved to server [S]">mix=saved [S]</button>
+        <button class="btn" id="btn-loop" title="repeat this song [o]">loop-song [o]:off</button>
+        <input id="loop-n-song" class="cli" type="number" min="1" max="99" value="2" title="song loop count" hidden>
+        <button class="btn" id="btn-looplist" title="repeat whole playlist [O]">loop-list [O]:off</button>
+        <input id="loop-n" class="cli" type="number" min="1" max="99" value="2" title="playlist loop count" hidden>
+        <button class="btn" id="btn-mute" title="mute [m]">mute [m]</button>
+        <button class="btn primary" id="btn-save-order" title="save current order to server [w]" hidden>save order [w]</button>
+      </div>
+      <div class="p-grid">
+        <div class="p-cell">
+          <span class="p-label">volume</span>
+          <div class="p-inline"><input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="volume"><span class="p-val" id="vol-val">100%</span></div>
+        </div>
+        <div class="p-cell">
+          <span class="p-label">speed <span class="hint">([ ] to step)</span></span>
+          <div class="p-inline">
+            <select id="speed" class="cli" aria-label="speed preset">
+              {% for s in ["0.5","0.75","1","1.25","1.5","1.75","2"] %}
+              <option value="{{ s }}" {% if s=="1" %}selected{% endif %}>{{ s }}x</option>{% endfor %}
+              <option value="custom">custom…</option>
+            </select>
+            <input id="speed-custom" class="cli" type="number" min="0.25" max="3" step="0.05" value="1" aria-label="custom speed" hidden>
+            <button class="btn" id="speed-set" hidden>set</button>
+          </div>
+        </div>
+        <div class="p-cell">
+          <span class="p-label">sleep timer <span class="hint">(z to cycle)</span></span>
+          <div class="p-inline">
+            <select id="sleep" class="cli" aria-label="sleep preset">
+              <option value="0">off</option><option value="15">15m</option>
+              <option value="30">30m</option><option value="45">45m</option>
+              <option value="60">60m</option><option value="90">90m</option>
+              <option value="120">120m</option><option value="custom">custom…</option>
+            </select>
+            <input id="sleep-custom" class="cli" type="number" min="1" max="480" step="1" placeholder="min" aria-label="custom sleep minutes" hidden>
+            <button class="btn" id="sleep-set" hidden>set</button>
+            <span class="hint" id="sleep-left"></span>
+          </div>
+        </div>
+      </div>
+      <div class="p-status" id="p-status">$ idle</div>
+      <div class="hint" style="margin-top:8px">drag tracks ↕ to reorder (or alt+↑/↓ on focused track) · unsaved changes show [save order]</div>
+      <div class="queue" id="queue"></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>more ~/playlists</h2><span class="right"><a href="/playlists">[all]</a></span></div>
+  <div class="grid">
+    {% for p in others %}
+    <article class="card">
+      {% if p.thumb_url %}<a href="{{ p.page_url }}"><img class="thumb" src="{{ p.thumb_url }}" alt="" loading="lazy"></a>{% endif %}
+      <div class="card-body"><div class="card-title"><a href="{{ p.page_url }}">{{ p.title }}</a></div>
+      <div class="meta">{{ p.count }} tracks · {{ p.total }}</div></div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/player.js"></script>
+<script>
+(function(){
+  const PID = "{{ pl.id }}";
+  const tracks = {{ pl.tracks|tojson }};
+  const audio = document.getElementById("audio");
+  const player = window.apPlayer({ audio, tracks, startIndex: 0, removable: true,
+    reorderable: true, playlistId: PID,
+    onPersistOrder: async (ids) => {
+      await window.apApi("/api/playlists/" + PID + "/reorder", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ ordered_ids: ids }) });
+    },
+    onRemove: async (t) => {
+      if (!confirm("remove '" + t.title + "' from playlist?")) return;
+      const p = await window.apApi("/api/playlists/" + PID + "/remove", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ audio_id: t.id }) });
+      location.reload();
+    }});
+  // edit
+  const ef = document.getElementById("edit-form");
+  const toggleEdit = () => { ef.hidden = !ef.hidden; if (!ef.hidden) ef.querySelector("input").focus(); };
+  document.getElementById("edit-toggle").onclick = toggleEdit;
+  ef.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(ef);
+    const body = { title: fd.get("title"), description: fd.get("description"), tags: fd.get("tags") };
+    const p = await window.apApi("/api/playlists/" + PID, { method: "PATCH",
+      headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    const f = fd.get("thumb");
+    if (f && f.size) {
+      const m = new FormData(); m.append("thumb", f);
+      await fetch("/api/playlists/" + PID + "/thumbnail/upload", { method: "POST", body: m });
+    }
+    location.reload();
+  };
+  // cover preview-then-keep: roll randoms, keep the one you like
+  let previewPath = null;
+  const seenPreviews = [];
+  const coverImg = document.getElementById("pl-thumb");
+  const keepBtn = document.getElementById("thumb-keep");
+  const noteEl = document.getElementById("thumb-note");
+  document.getElementById("thumb-random").onclick = async () => {
+    try {
+      const d = await window.apApi("/api/preview-thumbnail", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: "{}" });
+      previewPath = d.thumb_path;
+      seenPreviews.push(d.thumb_path);
+      if (coverImg) coverImg.src = d.thumb_url;
+      keepBtn.hidden = false;
+      noteEl.hidden = false;
+      window.apToast("preview #" + seenPreviews.length + " — [r] again, [u] keep");
+    } catch (err) { window.apToast("preview failed: " + err.message); }
+  };
+  keepBtn.onclick = async () => {
+    if (!previewPath) return;
+    try {
+      await window.apApi("/api/playlists/" + PID, { method: "PATCH",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ thumb_path: previewPath }) });
+      await window.apApi("/api/preview-cleanup", { method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ paths: seenPreviews.filter((p) => p !== previewPath) }) });
+      location.reload();
+    } catch (err) { window.apToast("keep failed: " + err.message); }
+  };
+  document.getElementById("pl-del").onclick = async () => {
+    if (!confirm("delete this playlist?")) return;
+    await window.apApi("/api/playlists/" + PID, { method: "DELETE" });
+    location.href = "/playlists";
+  };
+  // add tracks
+  document.getElementById("add-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const q = document.getElementById("add-q").value.trim();
+    const box = document.getElementById("add-results");
+    box.innerHTML = "<span class='hint'>$ searching…</span>";
+    try {
+      const d = await window.apApi("/api/audios?q=" + encodeURIComponent(q));
+      box.innerHTML = "";
+      if (!d.results.length) box.innerHTML = "<span class='hint'>no match</span>";
+      d.results.slice(0, 8).forEach((t) => {
+        const row = document.createElement("div");
+        row.className = "q-item";
+        row.innerHTML = "<span class='tt'></span><span class='d'>" + t.duration + "</span>";
+        row.querySelector(".tt").textContent = t.title + " — " + t.artist;
+        const add = document.createElement("button");
+        add.className = "btn"; add.textContent = "add";
+        add.onclick = async () => {
+          await window.apApi("/api/playlists/" + PID + "/add", { method: "POST",
+            headers: {"Content-Type":"application/json"}, body: JSON.stringify({ audio_id: t.id }) });
+          location.reload();
+        };
+        row.appendChild(add); box.appendChild(row);
+      });
+    } catch (err) { box.innerHTML = "<span class='hint'>search failed</span>"; }
+  };
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement||{}).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (e.key === "e") toggleEdit();
+    if (e.key === "r") document.getElementById("thumb-random").click();
+    if (e.key === "u" && !document.getElementById("thumb-keep").hidden) document.getElementById("thumb-keep").click();
+    if (e.key === "D") document.getElementById("pl-del").click();
+  });
+})();
+</script>
+{% endblock %}

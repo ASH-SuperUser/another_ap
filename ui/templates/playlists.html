@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}playlists{% endblock %}
+{% block content %}
+<section class="sec">
+  <div class="sec-head"><h2>playlists ~/all</h2><span class="right">{{ playlists|length }} shown · press <kbd>/</kbd> to search</span></div>
+  <form id="f" class="filters" method="get" action="/playlists">
+    <label style="flex:1;min-width:220px">query
+      <input name="q" class="cli" value="{{ q }}" data-search="/playlists" placeholder="@tags a ; b ; @noti c · @title words · plain text">
+    </label>
+    <label>sort
+      <select name="sort" class="cli">
+        {% for v in ["recent","name","songs","duration"] %}
+        <option value="{{ v }}" {% if sort==v %}selected{% endif %}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>order
+      <select name="order" class="cli">
+        <option value="desc" {% if order=="desc" %}selected{% endif %}>desc</option>
+        <option value="asc" {% if order=="asc" %}selected{% endif %}>asc</option>
+      </select>
+    </label>
+    <button class="btn primary" type="submit">filter [enter]</button>
+    <button class="btn" type="button" id="new-pl">+ new [n]</button>
+  </form>
+  <p class="hint">grammar: <kbd>@tags a ; b ; @noti c</kbd> <kbd>@title words</kbd> <kbd>@desc words</kbd> <kbd>@songs a ; b</kbd> <kbd>@artis a ; b</kbd> <kbd>@hash id</kbd> · combine freely · full guide <kbd>?</kbd></p>
+
+  <div id="new-box" class="side" hidden style="margin-bottom:12px">
+    <h3 style="margin:0 0 8px">$ new playlist</h3>
+    <form id="new-form" class="form-grid">
+      <label>title <input name="title" class="cli" required maxlength="120" placeholder="midnight terminal"></label>
+      <label>description <textarea name="description" class="cli" placeholder="what is this mix for?"></textarea></label>
+      <label>tags (; separated) <input name="tags" class="cli" placeholder="chill ; night ; code"></label>
+      <div><button class="btn primary" type="submit">create [enter]</button>
+      <button class="btn" type="button" id="new-cancel">cancel [esc]</button></div>
+    </form>
+  </div>
+
+  {% if playlists %}
+  <div class="grid" id="pl-grid">
+    {% for p in playlists %}
+    <article class="card">
+      {% if p.thumb_url %}<a href="{{ p.page_url }}"><img class="thumb" src="{{ p.thumb_url }}" alt="" loading="lazy"></a>
+      {% else %}<div class="thumb-fallback">~/p</div>{% endif %}
+      <div class="card-body">
+        <div class="card-title"><a href="{{ p.page_url }}">{{ p.title }}</a></div>
+        <div class="meta">{{ p.count }} tracks · {{ p.total }} · #{{ p.id }}</div>
+        {% if p.description %}<div class="meta">{{ p.description[:120] }}</div>{% endif %}
+        {% if p.tags %}<div class="tags">{% for t in p.tags %}<b>#</b>{{ t }} {% endfor %}</div>{% endif %}
+        <div class="row-actions">
+          <a class="btn" href="{{ p.page_url }}">open</a>
+          <button class="btn danger" data-del="{{ p.id }}">del</button>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">$ no playlists match. <kbd>@tags</kbd> typo? or <a href="#" id="empty-new">create one</a>.</div>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const box = document.getElementById("new-box");
+  const open = () => { box.hidden = false; box.querySelector("input").focus(); };
+  document.getElementById("new-pl").onclick = open;
+  const en = document.getElementById("empty-new");
+  if (en) en.onclick = (e) => { e.preventDefault(); open(); };
+  document.getElementById("new-cancel").onclick = () => { box.hidden = true; };
+  document.getElementById("new-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = { title: fd.get("title"), description: fd.get("description"), tags: fd.get("tags") };
+    try {
+      const p = await window.apApi("/api/playlists", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      location.href = p.page_url;
+    } catch (err) { window.apToast("create failed: " + err.message); }
+  };
+  document.querySelectorAll("[data-del]").forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm("delete playlist " + b.dataset.del + "? tracks stay in library.")) return;
+      try { await window.apApi("/api/playlists/" + b.dataset.del, { method: "DELETE" }); location.reload(); }
+      catch (err) { window.apToast("delete failed: " + err.message); }
+    };
+  });
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement||{}).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (e.key === "n") open();
+  });
+})();
+</script>
+{% endblock %}

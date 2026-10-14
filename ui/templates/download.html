@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}get audio{% endblock %}
+{% block content %}
+<section class="sec">
+  <div class="sec-head"><h2>get ~/download</h2><span class="right">3 ways · all local</span></div>
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
+    <div class="card"><div class="card-body">
+      <div class="card-title">01 // upload file</div>
+      <p class="hint">mp3/m4a/ogg/opus/wav/flac from your machine.</p>
+      <form id="up-form" class="form-grid">
+        <label>audio file <input type="file" name="file" accept="audio/*,.mp3,.m4a,.ogg,.oga,.opus,.wav,.flac" required></label>
+        <label>title <input name="title" class="cli" placeholder="defaults to filename"></label>
+        <label>artist <input name="artist" class="cli" placeholder="unknown"></label>
+        <label>description <textarea name="description" class="cli"></textarea></label>
+        <label>tags <input name="tags" class="cli" placeholder="a ; b ; c"></label>
+        <label>cover <input type="file" name="thumb" accept="image/*"></label>
+        <button class="btn primary" type="submit">upload [enter]</button>
+      </form>
+    </div></div>
+    <div class="card"><div class="card-body">
+      <div class="card-title">02 // fetch from url</div>
+      <p class="hint">direct mp3 link → staged → confirm metadata → save.</p>
+      <form id="url-form" class="form-grid">
+        <label>file url <input name="url" class="cli" required placeholder="https://…/track.mp3"></label>
+        <button class="btn primary" type="submit">fetch</button>
+      </form>
+      <form id="url-meta" class="form-grid" hidden style="margin-top:10px">
+        <div class="hint" id="url-stage">$ staged.</div>
+        <label>title <input name="title" class="cli"></label>
+        <label>artist <input name="artist" class="cli"></label>
+        <label>description <textarea name="description" class="cli"></textarea></label>
+        <label>tags <input name="tags" class="cli" placeholder="a ; b"></label>
+        <button class="btn primary" type="submit">save to library</button>
+      </form>
+    </div></div>
+    <div class="card"><div class="card-body">
+      <div class="card-title">03 // youtube</div>
+      <p class="hint">paste a youtube url → metadata prefilled → download audio → save. mp3 when ffmpeg is installed, else .m4a (plays everywhere).</p>
+      <form id="yt-form" class="form-grid">
+        <label>youtube url <input name="url" class="cli" required placeholder="https://youtube.com/watch?v=…"></label>
+        <div><button class="btn" type="button" id="yt-info">peek metadata [i]</button>
+        <button class="btn primary" type="submit">download audio</button></div>
+      </form>
+      <form id="yt-meta" class="form-grid" hidden style="margin-top:10px">
+        <div class="hint" id="yt-stage" style="white-space:pre-wrap">$ downloaded.</div>
+        <label>title <input name="title" class="cli"></label>
+        <label>artist <input name="artist" class="cli"></label>
+        <label>description <textarea name="description" class="cli"></textarea></label>
+        <label>tags <input name="tags" class="cli" placeholder="a ; b"></label>
+        <button class="btn primary" type="submit">save to library</button>
+      </form>
+    </div></div>
+  </div>
+  <p class="hint" style="margin-top:12px">keys: <kbd>i</kbd> peek yt metadata · forms are tab-navigable · <kbd>?</kbd> help</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const api = window.apApi, toast = window.apToast;
+  let stagedUrl = null, stagedYt = null;
+  // NOTE: form.title is the element's *title attribute* (builtin), NOT the
+  // input named "title" — so never use form.title/artist shortcuts here.
+  const field = (form, name) => form.querySelector('[name="' + name + '"]');
+
+  document.getElementById("up-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    toast("$ uploading…");
+    try {
+      const r = await fetch("/api/audios/upload", { method: "POST", body: fd });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const t = await r.json();
+      location.href = t.page_url;
+    } catch (err) { toast("upload failed: " + err.message); }
+  };
+
+  document.getElementById("url-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const url = new FormData(e.target).get("url");
+    toast("$ fetching…");
+    try {
+      stagedUrl = await api("/api/fetch/url", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ url }) });
+      const m = document.getElementById("url-meta");
+      m.hidden = false;
+      document.getElementById("url-stage").textContent = "$ staged: " + stagedUrl.filename;
+      field(m, "title").value = (stagedUrl.filename || "").replace(/\.[^.]+$/, "").replace(/_/g, " ");
+      field(m, "title").focus();
+      toast("fetched. confirm metadata ↓");
+    } catch (err) { toast("fetch failed: " + err.message); }
+  };
+  document.getElementById("url-meta").onsubmit = async (e) => {
+    e.preventDefault();
+    if (!stagedUrl) return;
+    const fd = new FormData(e.target);
+    try {
+      const t = await api("/api/audios/from-file", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({
+          path: stagedUrl.path, title: fd.get("title"), artist: fd.get("artist"),
+          description: fd.get("description"), tags: fd.get("tags") }) });
+      location.href = t.page_url;
+    } catch (err) { toast("save failed: " + err.message); }
+  };
+
+  async function ytPeek() {
+    const url = new FormData(document.getElementById("yt-form")).get("url");
+    if (!url) return;
+    toast("$ reading metadata…");
+    try {
+      const info = await api("/api/fetch/yt-info", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ url }) });
+      const m = document.getElementById("yt-meta");
+      m.hidden = false;
+      field(m, "title").value = info.title || "";
+      field(m, "artist").value = info.artist || "";
+      field(m, "description").value = info.description || "";
+      document.getElementById("yt-stage").textContent = "$ " + (info.title || "") + " · " + (info.duration || "?") + "s (metadata only, not yet downloaded)";
+      m.dataset.remote_thumb = info.thumbnail || "";
+      toast("metadata prefilled ↓ (now hit download)");
+    } catch (err) { toast("peek failed: " + err.message); }
+  }
+  document.getElementById("yt-info").onclick = ytPeek;
+  document.getElementById("yt-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const url = new FormData(e.target).get("url");
+    toast("$ downloading from youtube… (may take a while)");
+    try {
+      stagedYt = await api("/api/fetch/yt", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ url }) });
+      const m = document.getElementById("yt-meta");
+      m.hidden = false;
+      if (!field(m, "title").value) field(m, "title").value = stagedYt.title || "";
+      if (!field(m, "artist").value) field(m, "artist").value = stagedYt.artist || "";
+      if (!field(m, "description").value) field(m, "description").value = stagedYt.description || "";
+      if (!m.dataset.remote_thumb && stagedYt.thumbnail) m.dataset.remote_thumb = stagedYt.thumbnail;
+      if (stagedYt.duration && !m.dataset.duration) m.dataset.duration = stagedYt.duration;
+      document.getElementById("yt-stage").textContent =
+        "$ downloaded: " + stagedYt.filename + (stagedYt.note ? "\n$ note: " + stagedYt.note : "");
+      toast("downloaded. confirm metadata ↓");
+    } catch (err) { toast("yt download failed: " + err.message); }
+  };
+  document.getElementById("yt-meta").onsubmit = async (e) => {
+    e.preventDefault();
+    if (!stagedYt) { toast("download first"); return; }
+    const fd = new FormData(e.target);
+    try {
+      const t = await api("/api/audios/from-file", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({
+          path: stagedYt.path, title: fd.get("title") || stagedYt.title, artist: fd.get("artist") || stagedYt.artist,
+          description: fd.get("description"), tags: fd.get("tags"),
+          remote_thumb: e.target.dataset.remote_thumb || stagedYt.thumbnail || "",
+          duration: e.target.dataset.duration || stagedYt.duration }) });
+      location.href = t.page_url;
+    } catch (err) { toast("save failed: " + err.message); }
+  };
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement||{}).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (e.key === "i") ytPeek();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}home{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>$ another_ap <span class="dim">— {{ tagline }}</span></h1>
+  <p><span class="prompt">></span> {{ stats.audios }} tracks :: {{ stats.playlists }} playlists :: {{ stats.total_sec|fmt_duration }} total
+     &nbsp;·&nbsp; <a href="/playlists">[browse playlists]</a> <a href="/audios">[browse audios]</a> <a href="/download">[+get audio]</a></p>
+  <form class="inline-form" onsubmit="return false;">
+    <input id="home-q" class="cli" style="flex:1;min-width:240px" data-search="/audios"
+           placeholder="$ type query, enter = search audios · try: @tags chill ; @noti noisy">
+    <span class="hint">plain text searches everything · <kbd>?</kbd> grammar</span>
+  </form>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>playlists ~/random</h2><span class="right"><a href="/playlists">[all playlists]</a></span></div>
+  {% if playlists %}
+  <div class="grid">
+    {% for p in playlists %}
+    <article class="card">
+      {% if p.thumb_url %}<a href="{{ p.page_url }}"><img class="thumb" src="{{ p.thumb_url }}" alt="" loading="lazy"></a>
+      {% else %}<div class="thumb-fallback">~/p</div>{% endif %}
+      <div class="card-body">
+        <div class="card-title"><a href="{{ p.page_url }}">{{ p.title }}</a></div>
+        <div class="meta">{{ p.count }} tracks · {{ p.total }} · <span class="hint">#{{ p.id }}</span></div>
+        {% if p.tags %}<div class="tags">{% for t in p.tags %}<b>#</b>{{ t }} {% endfor %}</div>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">$ no playlists yet — <a href="/download">[+get audio]</a> then create one on <a href="/playlists">/playlists</a>.</div>{% endif %}
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>audios ~/random</h2><span class="right"><a href="/audios">[all audios]</a></span></div>
+  {% if audios %}
+  <div class="grid">
+    {% for t in audios %}
+    <article class="card">
+      {% if t.thumb_url %}<a href="{{ t.page_url }}"><img class="thumb" src="{{ t.thumb_url }}" alt="" loading="lazy"></a>
+      {% else %}<div class="thumb-fallback">~/a</div>{% endif %}
+      <div class="card-body">
+        <div class="card-title"><a href="{{ t.page_url }}">{{ t.title }}</a></div>
+        <div class="meta">{{ t.artist }} · {{ t.duration }}</div>
+        {% if t.tags %}<div class="tags">{% for x in t.tags %}<b>#</b>{{ x }} {% endfor %}</div>{% endif %}
+        <div class="row-actions"><a class="btn" href="{{ t.page_url }}">open [enter]</a></div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">$ library empty. <a href="/download">[+get your first track]</a>.</div>{% endif %}
+</section>
+{% endblock %}
