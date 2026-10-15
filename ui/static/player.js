@@ -40,6 +40,8 @@
     let sleepTimer = null, sleepAt = 0;
     let dirty = false, saving = false;
     let dragFrom = -1;
+    let selectMode = false;
+    const selected = new Set(); // track indices (into opts.tracks) ticked in bulk-edit
     window.apPlayerActive = true;
 
     const els = {
@@ -54,7 +56,7 @@
       sleep: $("#sleep"), sleepC: $("#sleep-custom"), sleepSet: $("#sleep-set"),
       sleepLeft: $("#sleep-left"),
       nowT: $("#now-title"), nowA: $("#now-artist"), nowCount: $("#now-count"),
-      nowD: $("#now-desc"), status: $("#p-status"),
+      nowD: $("#now-desc"), nowThumb: $("#now-thumb"), status: $("#p-status"),
     };
 
     function cur() { return opts.tracks[order[pos]]; }
@@ -99,8 +101,26 @@
       status("moved to #" + (ins + 1) + (dirty ? " (unsaved — [w] saves to server)" : ""));
     }
 
+    // ---- bulk selection (checkbox edit mode; page owns the buttons) ----
+    function getSelectedIds() {
+      const out = [];
+      order.forEach((ti) => { if (selected.has(ti)) out.push(opts.tracks[ti].id); });
+      return out;
+    }
+    function setSelectMode(on) {
+      selectMode = !!on;
+      if (!selectMode) selected.clear();
+      renderQueue();
+      if (opts.onSelection) { try { opts.onSelection(getSelectedIds()); } catch (_) {} }
+    }
+    function selectAll(none) {
+      selected.clear();
+      if (!none) order.forEach((ti) => selected.add(ti));
+      renderQueue();
+      if (opts.onSelection) { try { opts.onSelection(getSelectedIds()); } catch (_) {} }
+    }
+
     function clearDropMarks() {
-      if (!listEl) return;
       Array.from(listEl.children).forEach((c) => c.classList.remove("drop-before", "drop-after", "dragging"));
     }
 
@@ -116,8 +136,24 @@
         div.dataset.pos = p;
         if (canReorder) div.draggable = true;
         div.innerHTML = "<span class='n'>" + String(p + 1).padStart(2, "0") + "</span>" +
+          (t.thumb_url ? "<img class='q-thumb' loading='lazy' alt=''>" : "") +
           "<span class='tt'></span><span class='d'>" + fmt(t.duration_sec) + "</span>";
+        const qi = div.querySelector(".q-thumb");
+        if (qi) qi.src = t.thumb_url;
         div.querySelector(".tt").textContent = (p === pos ? "> " : "") + t.title + " — " + t.artist;
+        if (selectMode) {
+          const cb = document.createElement("input");
+          cb.type = "checkbox"; cb.className = "q-sel"; cb.checked = selected.has(ti);
+          cb.title = "select for bulk edit";
+          cb.setAttribute("aria-label", "select " + t.title);
+          cb.addEventListener("click", (e) => e.stopPropagation());
+          cb.addEventListener("change", (e) => {
+            e.stopPropagation();
+            if (cb.checked) selected.add(ti); else selected.delete(ti);
+            if (opts.onSelection) { try { opts.onSelection(getSelectedIds()); } catch (_) {} }
+          });
+          div.insertBefore(cb, div.firstChild);
+        }
         const go = () => { pos = p; songLeft = songN; syncLoopUI(); load(true); };
         div.addEventListener("click", (e) => { if (!e.target.closest("[data-rm]")) go(); });
         div.addEventListener("keydown", (e) => {
@@ -173,6 +209,10 @@
       if (els.nowT) els.nowT.textContent = t.title;
       if (els.nowA) els.nowA.textContent = t.artist;
       if (els.nowCount) els.nowCount.textContent = (pos + 1) + "/" + order.length;
+      if (els.nowThumb) {
+        if (t.thumb_url) { els.nowThumb.src = t.thumb_url; els.nowThumb.hidden = false; }
+        else els.nowThumb.hidden = true;
+      }
       if (els.nowD) els.nowD.textContent = t.description || "";
       if (els.tDur) els.tDur.textContent = fmt(t.duration_sec);
       document.title = t.title + " // another_ap";
@@ -180,7 +220,16 @@
       const qi = listEl && listEl.children[pos];
       if (qi) qi.scrollIntoView({ block: "nearest" });
       status("loaded: " + t.title + (passNum > 1 ? "  (pass #" + passNum + ")" : ""));
-      if (autoplay) audio.play().catch(() => { setPlayBtn(false); });
+      if (autoplay) {
+        audio.play().catch(() => { setPlayBtn(false); });
+        // count a playlist play per track start (server no-ops in low disk mode)
+        if (opts.playlistId && window.apApi) {
+          try {
+            const r = window.apApi("/api/playlists/" + opts.playlistId + "/play", { method: "POST" });
+            if (r && r.catch) r.catch(() => {});
+          } catch (_) {}
+        }
+      }
       if (opts.onTrack) opts.onTrack(t, pos);
     }
 
@@ -484,6 +533,7 @@
       load, next, prev, toggle, save: doSave,
       getOrderIds: orderIds,
       isDirty: () => dirty,
+      setSelectMode, selectAll, getSelectedIds,
       get pos() { return pos; },
     };
   }

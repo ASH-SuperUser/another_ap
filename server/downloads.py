@@ -82,6 +82,44 @@ def has_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+def fetch_image(url: str, prefix: str = "preview_url") -> dict:
+    """Download an image URL into thumbs/ for the cover picker. Validated."""
+    import httpx
+
+    if not url.startswith(("http://", "https://")):
+        raise RuntimeError("url must start with http(s)://")
+    os.makedirs(config.THUMB_DIR, exist_ok=True)
+    cap = 10 * 1024 * 1024
+    try:
+        r = httpx.get(url, timeout=30, follow_redirects=True,
+                      headers={"User-Agent": "another_ap/1.0"})
+        r.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"could not fetch image: {e}") from e
+    ctype = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+    ext = {  # content-type first, url suffix as fallback
+        "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+        "image/gif": ".gif",
+    }.get(ctype)
+    if ext is None:
+        m = re.search(r"\.(png|jpe?g|webp|gif)(\?|$)", url, re.IGNORECASE)
+        if not m:
+            raise RuntimeError(f"not an image (content-type: {ctype or 'unknown'})")
+        ext = "." + m.group(1).lower().replace("jpeg", "jpg")
+    if len(r.content) > cap:
+        raise RuntimeError("image exceeds 10MB")
+    if len(r.content) < 64:
+        raise RuntimeError("image is empty")
+    import time as _t
+
+    stamp = str(int(_t.time() * 1000))[-6:]
+    dest = os.path.join(config.THUMB_DIR, f"{prefix}_{stamp}{ext}")
+    with open(dest, "wb") as f:
+        f.write(r.content)
+    return {"thumb_path": dest, "thumb_url": "/thumbs/" + os.path.basename(dest),
+            "size": len(r.content)}
+
+
 def yt_download(url: str, progress_hook=None) -> dict:
     """Download best-audio via yt-dlp in a SINGLE attempt.
 

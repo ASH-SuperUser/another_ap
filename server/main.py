@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from server import db as store
-from server.downloads import fetch_direct_url, yt_download, yt_info
+from server.downloads import fetch_direct_url, fetch_image, yt_download, yt_info
 from server.utils import (
     audio_duration,
     fmt_bytes,
@@ -38,6 +38,22 @@ app.mount("/thumbs", StaticFiles(directory=config.THUMB_DIR), name="thumbs")
 def _startup() -> None:
     store.init_db()
     sweep_preview_thumbs()
+    if config.AUTOGEN_ENABLED:
+        try:
+            summary = store.sync_autogen_playlists()
+            if summary.get("created") or summary.get("updated") or summary.get("removed"):
+                print(f"$ autogen playlists: +{len(summary['created'])} ~{len(summary['updated'])} -{len(summary['removed'])}")
+        except Exception as e:
+            print(f"$ autogen sync failed (non-fatal): {e}")
+
+
+def _maybe_sync_autogen() -> None:
+    """Re-sync tag playlists after library writes (cheap no-op when disabled)."""
+    if config.AUTOGEN_SYNC_ON_WRITE:
+        try:
+            store.sync_autogen_playlists()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------- helpers
@@ -69,6 +85,8 @@ def _playlist_public(p: dict, with_tracks: bool = False) -> dict:
         "count": p["count"], "total_sec": p["total_sec"],
         "total": fmt_duration(p["total_sec"]),
         "page_url": f"/p/{p['id']}",
+        "is_autogen": bool(p.get("is_autogen")), "autogen_tag": p.get("autogen_tag"),
+        "plays": p.get("play_count", 0),
     }
     if with_tracks:
         d["tracks"] = [_audio_public(t) for t in p["tracks"]]
@@ -126,13 +144,41 @@ def _accept_thumb_path(p: str | None) -> str | None:
     return ap
 
 
+def _adopt_preview_thumb(path: str, kind: str, ident: str) -> str:
+    """Kept covers shed the preview_ prefix so the abandon-sweep never eats them."""
+    base = os.path.basename(path)
+    if not base.startswith("preview_"):
+        return path
+    ext = os.path.splitext(base)[1].lower() or ".png"
+    dest = os.path.join(config.THUMB_DIR, f"{kind}_{ident[:8]}_{new_id(3)}{ext}")
+    try:
+        os.rename(path, dest)
+    except OSError:
+        return path
+    return dest
+
+
 def sweep_preview_thumbs(max_age_s: float = 3600) -> int:
-    """Delete abandoned preview_* covers (e.g. user previewed but never kept)."""
+    """Delete abandoned preview_* covers (older than max_age, unreferenced).
+
+    Never touches files still referenced by any audio/playlist row — even if
+    they still carry the preview_ name (kept covers from before adopting).
+    """
     now = time.time()
     removed = 0
     try:
+        with store.db() as con:
+            rows_a = con.execute("SELECT thumb_path FROM audios").fetchall()
+            rows_p = con.execute("SELECT thumb_path FROM playlists").fetchall()
+        referenced = set()
+        for (tp,) in list(rows_a) + list(rows_p):
+            if tp:
+                referenced.add(os.path.basename(str(tp).replace("\\", "/")))
+    except Exception:
+        referenced = set()
+    try:
         for f in os.listdir(config.THUMB_DIR):
-            if not f.startswith("preview_"):
+            if not f.startswith("preview_") or f in referenced:
                 continue
             full = os.path.join(config.THUMB_DIR, f)
             try:
@@ -232,7 +278,8 @@ def stream(aid: str, request: Request):
     size = os.path.getsize(path)
     ctype, _ = mimetypes.guess_type(path)
     ctype = ctype or "audio/mpeg"
-    store.bump_play(aid)
+    if config.HIGH_DISK_USAGE_MODE:
+        store.bump_play(aid)  # low disk mode: zero writes on plain streaming
 
     range_h = request.headers.get("range")
     if not range_h:
@@ -341,6 +388,7 @@ async def api_audio_upload(
     dur = audio_duration(dest)
     a = store.create_audio(title or os.path.splitext(file.filename or "untitled")[0],
                            artist or "unknown", description, tags, dest, thumb_path, dur, size)
+    _maybe_sync_autogen()
     return _audio_public(a)
 
 
@@ -379,6 +427,7 @@ def api_audio_from_file(payload: dict):
     a = store.create_audio(title, payload.get("artist") or "unknown",
                            payload.get("description") or "", payload.get("tags") or "",
                            path, thumb_path, dur, size)
+    _maybe_sync_autogen()
     return _audio_public(a)
 
 
@@ -386,10 +435,13 @@ def api_audio_from_file(payload: dict):
 def api_audio_patch(aid: str, payload: dict):
     fields = {k: payload[k] for k in ("title", "artist", "description", "tags") if k in payload}
     if "thumb_path" in payload:
-        fields["thumb_path"] = _accept_thumb_path(payload.get("thumb_path"))
+        fields["thumb_path"] = _adopt_preview_thumb(
+            _accept_thumb_path(payload.get("thumb_path")) or "", "au", aid)
     a = store.update_audio(aid, fields)
     if not a:
         raise HTTPException(404, "not found")
+    if "tags" in fields:
+        _maybe_sync_autogen()
     return _audio_public(a)
 
 
@@ -398,6 +450,7 @@ def api_audio_delete(aid: str):
     a = store.delete_audio(aid)
     if not a:
         raise HTTPException(404, "not found")
+    _maybe_sync_autogen()
     return {"ok": True, "deleted": aid}
 
 
@@ -455,7 +508,8 @@ def api_playlist_one(pid: str):
 def api_playlist_patch(pid: str, payload: dict):
     fields = {k: payload[k] for k in ("title", "description", "tags") if k in payload}
     if "thumb_path" in payload:
-        fields["thumb_path"] = _accept_thumb_path(payload.get("thumb_path"))
+        fields["thumb_path"] = _adopt_preview_thumb(
+            _accept_thumb_path(payload.get("thumb_path")) or "", "pl", pid)
     p = store.update_playlist(pid, fields)
     if not p:
         raise HTTPException(404, "not found")
@@ -487,6 +541,27 @@ def api_playlist_remove(pid: str, payload: dict):
     if not p:
         raise HTTPException(404, "not found")
     return _playlist_public(p, True)
+
+
+@app.post("/api/playlists/{pid}/remove-many")
+def api_playlist_remove_many(pid: str, payload: dict):
+    aids = payload.get("audio_ids") or []
+    if not isinstance(aids, list) or not aids:
+        raise HTTPException(400, "audio_ids must be a non-empty list")
+    p = store.playlist_remove_many(pid, [str(x) for x in aids])
+    if not p:
+        raise HTTPException(404, "not found")
+    return _playlist_public(p, True)
+
+
+@app.post("/api/playlists/{pid}/play")
+def api_playlist_play(pid: str):
+    """Count one playlist play (client pings on track start). No-op in low disk mode."""
+    if not config.HIGH_DISK_USAGE_MODE:
+        return {"ok": True, "counted": False}
+    if not store.bump_playlist_play(pid):
+        raise HTTPException(404, "not found")
+    return {"ok": True, "counted": True}
 
 
 @app.post("/api/playlists/{pid}/reorder")
@@ -521,6 +596,18 @@ async def api_playlist_thumb_upload(pid: str, thumb: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------- fetch / download APIs
+
+@app.post("/api/fetch/image")
+def api_fetch_image(payload: dict):
+    """Fetch a cover image from a plain http(s) URL into thumbs/ (staged)."""
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "url required")
+    try:
+        return fetch_image(url)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e)) from e
+
 
 @app.post("/api/fetch/url")
 def api_fetch_url(payload: dict):

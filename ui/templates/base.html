@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ app_name }}{% endblock %} // {{ app_name }}</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=6">
 <style>
 :root{
   --bg:{{ theme.bg }}; --panel:{{ theme.panel }}; --fg:{{ theme.fg }};
@@ -68,7 +68,7 @@ PLAYER (playlist + audio pages)
   0-9         jump to queue index (playlist)
 LISTS
   j/k or arrows move between cards, enter opens, e edits (on detail)
-  r rolls a random cover preview, u keeps it (playlist + track pages)</pre>
+  E bulk track-edit, a add-tracks popup, c cover popup (playlist page)</pre>
       <pre class="help-pre">SEARCH GRAMMAR  (playlists + audios)
   hello world              plain: match across title/artist/desc/tags
   @tags a ; b ; @noti c    only tags a+b, exclude c
@@ -112,7 +112,7 @@ LISTS
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script>window.__ACTIVE_THEME__ = "{{ theme.active_name }}";</script>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=4"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

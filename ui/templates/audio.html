@@ -42,6 +42,7 @@
       <div class="now">
         <div class="now-meta">
           <span class="prompt">▶</span>
+          <img id="now-thumb" class="now-thumb" alt="now playing cover" hidden>
           <div class="grow"><div class="t" id="now-title">--</div><div class="a" id="now-artist">--</div></div>
           <div class="now-count" id="now-count" title="queue position">--/--</div>
         </div>
@@ -111,7 +112,7 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="/static/player.js"></script>
+<script src="/static/player.js?v=4"></script>
 <script>
 (function(){
   const AID = "{{ track.id }}";

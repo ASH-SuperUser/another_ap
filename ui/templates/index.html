@@ -22,7 +22,7 @@
       {% else %}<div class="thumb-fallback">~/p</div>{% endif %}
       <div class="card-body">
         <div class="card-title"><a href="{{ p.page_url }}">{{ p.title }}</a></div>
-        <div class="meta">{{ p.count }} tracks · {{ p.total }} · <span class="hint">#{{ p.id }}</span></div>
+        <div class="meta">{{ p.count }} tracks · {{ p.total }} · <span class="hint">#{{ p.id }}</span>{% if p.is_autogen %} <b>[auto]</b>{% endif %}</div>
         {% if p.tags %}<div class="tags">{% for t in p.tags %}<b>#</b>{{ t }} {% endfor %}</div>{% endif %}
       </div>
     </article>

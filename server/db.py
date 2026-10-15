@@ -74,13 +74,16 @@ def init_db() -> None:
             """CREATE TABLE IF NOT EXISTS playlists(
                 id VARCHAR PRIMARY KEY,
                 title VARCHAR, description VARCHAR, tags VARCHAR,
-                thumb_path VARCHAR, created_at DOUBLE, updated_at DOUBLE
+                thumb_path VARCHAR, created_at DOUBLE, updated_at DOUBLE,
+                is_autogen BOOLEAN DEFAULT FALSE, autogen_tag VARCHAR DEFAULT NULL,
+                play_count BIGINT DEFAULT 0
             )"""
         )
         con.execute(
             """CREATE TABLE IF NOT EXISTS playlist_items(
                 playlist_id VARCHAR, audio_id VARCHAR,
                 position INTEGER, added_at DOUBLE,
+                source VARCHAR DEFAULT 'manual',
                 PRIMARY KEY (playlist_id, position)
             )"""
         )
@@ -108,6 +111,17 @@ def init_db() -> None:
         con.execute(
             "INSERT INTO settings(key,value) VALUES('active_theme','dark') ON CONFLICT(key) DO NOTHING"
         )
+        # migrations for pre-existing databases (ADD COLUMN IF NOT EXISTS)
+        for stmt in (
+            "ALTER TABLE playlists ADD COLUMN IF NOT EXISTS is_autogen BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE playlists ADD COLUMN IF NOT EXISTS autogen_tag VARCHAR DEFAULT NULL",
+            "ALTER TABLE playlists ADD COLUMN IF NOT EXISTS play_count BIGINT DEFAULT 0",
+            "ALTER TABLE playlist_items ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual'",
+        ):
+            try:
+                con.execute(stmt)
+            except Exception:
+                pass  # very old duckdb: column may already exist / stmt unsupported
 
 
 # ---------------------------------------------------------------- row helpers
@@ -135,6 +149,9 @@ def _row_to_playlist(r: dict[str, Any], items: list[dict] | None = None) -> dict
         "created_at": r.get("created_at"), "updated_at": r.get("updated_at"),
         "count": len(items or []), "total_sec": total,
         "tracks": items or [],
+        "is_autogen": bool(r.get("is_autogen")),
+        "autogen_tag": r.get("autogen_tag"),
+        "play_count": r.get("play_count") or 0,
     }
 
 
@@ -307,15 +324,17 @@ def create_playlist(title: str, description: str, tags: str, thumb_path: str | N
         while _fetchall(con, "SELECT id FROM playlists WHERE id=?", [pid]):
             pid = new_id(6)
         con.execute(
-            "INSERT INTO playlists VALUES(?,?,?,?,?,?,?)",
+            """INSERT INTO playlists(id,title,description,tags,thumb_path,created_at,updated_at,
+                   is_autogen,autogen_tag,play_count) VALUES(?,?,?,?,?,?,?,?,?,?)""",
             [pid, title.strip() or "untitled", description or "",
-             " ; ".join(split_tags(tags)), thumb_path, now, now],
+             " ; ".join(split_tags(tags)), thumb_path, now, now, False, None, 0],
         )
         if track_ids:
             for i, aid in enumerate(track_ids):
                 con.execute(
-                    "INSERT INTO playlist_items VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
-                    [pid, aid, i, now],
+                    """INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                       VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING""",
+                    [pid, aid, i, now, "manual"],
                 )
     return get_playlist(pid)  # type: ignore
 
@@ -378,7 +397,8 @@ def playlist_add(pid: str, aid: str) -> dict | None:
             return None
         cur = con.execute("SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?", [pid]).fetchone()
         nxt = int(cur[0]) if cur else 0
-        con.execute("INSERT INTO playlist_items VALUES(?,?,?,?) ON CONFLICT DO NOTHING", [pid, aid, nxt, time.time()])
+        con.execute("""INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                       VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING""", [pid, aid, nxt, time.time(), "manual"])
         con.execute("UPDATE playlists SET updated_at=? WHERE id=?", [time.time(), pid])
     return get_playlist(pid)
 
@@ -389,11 +409,12 @@ def playlist_remove(pid: str, aid: str, position: int | None = None) -> dict | N
             con.execute("DELETE FROM playlist_items WHERE playlist_id=? AND audio_id=?", [pid, aid])
         else:
             con.execute("DELETE FROM playlist_items WHERE playlist_id=? AND position=?", [pid, position])
-        # compact positions
-        rows = _fetchall(con, "SELECT audio_id FROM playlist_items WHERE playlist_id=? ORDER BY position ASC", [pid])
+        # compact positions (preserving each item's source flag)
+        rows = _fetchall(con, "SELECT audio_id, source FROM playlist_items WHERE playlist_id=? ORDER BY position ASC", [pid])
         con.execute("DELETE FROM playlist_items WHERE playlist_id=?", [pid])
         for i, r in enumerate(rows):
-            con.execute("INSERT INTO playlist_items VALUES(?,?,?,?)", [pid, r["audio_id"], i, time.time()])
+            con.execute("""INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                           VALUES(?,?,?,?,?)""", [pid, r["audio_id"], i, time.time(), r.get("source") or "manual"])
         con.execute("UPDATE playlists SET updated_at=? WHERE id=?", [time.time(), pid])
     return get_playlist(pid)
 
@@ -402,12 +423,146 @@ def playlist_reorder(pid: str, ordered_ids: list[str]) -> dict | None:
     with db() as con:
         if not _fetchall(con, "SELECT id FROM playlists WHERE id=?", [pid]):
             return None
+        # preserve each item's origin flag (auto vs manual) across the rewrite
+        prev = {r["audio_id"]: (r.get("source") or "manual") for r in
+                _fetchall(con, "SELECT audio_id, source FROM playlist_items WHERE playlist_id=?", [pid])}
         con.execute("DELETE FROM playlist_items WHERE playlist_id=?", [pid])
         for i, aid in enumerate(ordered_ids):
             if _fetchall(con, "SELECT id FROM audios WHERE id=?", [aid]):
-                con.execute("INSERT INTO playlist_items VALUES(?,?,?,?)", [pid, aid, i, time.time()])
+                con.execute("""INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                               VALUES(?,?,?,?,?)""", [pid, aid, i, time.time(), prev.get(aid, "manual")])
         con.execute("UPDATE playlists SET updated_at=? WHERE id=?", [time.time(), pid])
     return get_playlist(pid)
+
+
+def playlist_remove_many(pid: str, aids: list[str]) -> dict | None:
+    """Remove several tracks at once (bulk edit); compacts positions once."""
+    with db() as con:
+        if not _fetchall(con, "SELECT id FROM playlists WHERE id=?", [pid]):
+            return None
+        want = {str(a) for a in aids if a}
+        if want:
+            marks = ",".join("?" for _ in want)
+            con.execute(f"DELETE FROM playlist_items WHERE playlist_id=? AND audio_id IN ({marks})",
+                        [pid, *want])
+        rows = _fetchall(con, "SELECT audio_id, source FROM playlist_items WHERE playlist_id=? ORDER BY position ASC", [pid])
+        con.execute("DELETE FROM playlist_items WHERE playlist_id=?", [pid])
+        for i, r in enumerate(rows):
+            con.execute("""INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                           VALUES(?,?,?,?,?)""", [pid, r["audio_id"], i, time.time(), r.get("source") or "manual"])
+        con.execute("UPDATE playlists SET updated_at=? WHERE id=?", [time.time(), pid])
+    return get_playlist(pid)
+
+
+def bump_playlist_play(pid: str) -> bool:
+    """Count one playlist play. Caller gates on config.HIGH_DISK_USAGE_MODE."""
+    with db() as con:
+        if not _fetchall(con, "SELECT id FROM playlists WHERE id=?", [pid]):
+            return False
+        con.execute("UPDATE playlists SET play_count = play_count + 1 WHERE id=?", [pid])
+        return True
+
+
+def _autogen_id(tag_lower: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(("autogen:" + tag_lower).encode()).hexdigest()[:12]
+
+
+def sync_autogen_playlists() -> dict:
+    """Create/update/delete tag-driven playlists per config.
+
+    - tags with >= AUTOGEN_MIN_AUDIOS tracks get a playlist titled
+      "<Tag> [autogenerated]" (tagged 'autogenerated'), id stable per tag.
+    - reconcile: append missing matching tracks (source='auto'), drop
+      'auto' tracks that no longer match / were deleted. Hand-added
+      tracks are never touched. Lists below threshold are deleted.
+    - disabled via AUTOGEN_ENABLED=False (existing lists left alone).
+    Returns a summary dict.
+    """
+    summary: dict[str, Any] = {"created": [], "updated": [], "removed": [], "ok": True}
+    if not config.AUTOGEN_ENABLED:
+        summary.update(ok=False, reason="disabled")
+        return summary
+    min_n = max(1, int(config.AUTOGEN_MIN_AUDIOS))
+    audios = list_audios()
+    groups: dict[str, dict] = {}
+    for a in audios:
+        for t in a["tags"]:
+            key = t.lower()
+            g = groups.setdefault(key, {"name": t, "ids": []})
+            if a["id"] not in g["ids"]:
+                g["ids"].append(a["id"])
+    # audio created_at order for stable track order
+    created = {a["id"]: (a.get("created_at") or 0) for a in audios}
+    alive = set(created)
+    qualifying = {k: v for k, v in groups.items() if len([i for i in v["ids"] if i in alive]) >= min_n}
+
+    with db() as con:
+        existing = _fetchall(con, "SELECT * FROM playlists WHERE is_autogen=TRUE")
+        by_tag = {(r.get("autogen_tag") or "").lower(): r for r in existing}
+        # remove lists whose tag no longer qualifies
+        for key, r in by_tag.items():
+            if key not in qualifying:
+                con.execute("DELETE FROM playlist_items WHERE playlist_id=?", [r["id"]])
+                con.execute("DELETE FROM playlists WHERE id=?", [r["id"]])
+                try:
+                    if r.get("thumb_path") and os.path.isfile(r["thumb_path"]):
+                        os.remove(r["thumb_path"])
+                except OSError:
+                    pass
+                summary["removed"].append(key)
+        # create / reconcile qualifying lists
+        for key, g in sorted(qualifying.items()):
+            want = sorted([i for i in g["ids"] if i in alive], key=lambda i: created.get(i, 0))
+            want_set = set(want)
+            row = by_tag.get(key)
+            if row is None:
+                pid = _autogen_id(key)
+                if _fetchall(con, "SELECT id FROM playlists WHERE id=?", [pid]):
+                    pid = new_id(6)  # absurdly unlikely hash clash with a manual list
+                from server.utils import generate_thumbnail  # local: keep imports light
+
+                thumb = generate_thumbnail(
+                    os.path.join(config.THUMB_DIR, f"auto_{pid}.png"), "autogen " + g["name"])
+                now = time.time()
+                con.execute(
+                    """INSERT INTO playlists(id,title,description,tags,thumb_path,created_at,updated_at,
+                           is_autogen,autogen_tag,play_count) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    [pid, f"{g['name']} [autogenerated]",
+                     f"autogenerated playlist: every track tagged '{g['name']}'. "
+                     f"auto-kept by the server — tracks you add by hand are kept.",
+                     " ; ".join([g["name"], "autogenerated"]), thumb, now, now, True, g["name"], 0],
+                )
+                for i, aid in enumerate(want):
+                    con.execute("""INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                                   VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING""",
+                                [pid, aid, i, now, "auto"])
+                summary["created"].append(key)
+            else:
+                pid = row["id"]
+                have = _fetchall(con, "SELECT audio_id, source FROM playlist_items WHERE playlist_id=?", [pid])
+                have_ids = {h["audio_id"] for h in have}
+                # drop auto tracks that no longer match (or whose audio is gone)
+                stale = [h["audio_id"] for h in have
+                         if (h.get("source") or "manual") == "auto" and h["audio_id"] not in want_set]
+                if stale:
+                    marks = ",".join("?" for _ in stale)
+                    con.execute(f"DELETE FROM playlist_items WHERE playlist_id=? AND audio_id IN ({marks})",
+                                [pid, *stale])
+                # append newly matching tracks
+                if missing := [i for i in want if i not in have_ids]:
+                    cur = con.execute("SELECT COALESCE(MAX(position),-1)+1 FROM playlist_items WHERE playlist_id=?",
+                                      [pid]).fetchone()
+                    nxt = int(cur[0]) if cur else 0
+                    for k, aid in enumerate(missing):
+                        con.execute("""INSERT INTO playlist_items(playlist_id,audio_id,position,added_at,source)
+                                       VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING""",
+                                    [pid, aid, nxt + k, time.time(), "auto"])
+                if stale or missing:
+                    con.execute("UPDATE playlists SET updated_at=? WHERE id=?", [time.time(), pid])
+                    summary["updated"].append(key)
+    return summary
 
 
 def list_playlists() -> list[dict]:
