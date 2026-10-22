@@ -105,7 +105,7 @@ def _page_ctx(request: Request, extra: dict | None = None) -> dict:
     ctx: dict = {
         "request": request, "app_name": config.APP_NAME,
         "tagline": config.APP_TAGLINE, "theme": _active_theme(),
-        "themes": store.list_themes(),
+        "themes": store.list_themes(), "config": config,
     }
     if extra:
         ctx.update(extra)
@@ -214,6 +214,16 @@ def playlists_page(request: Request, q: str = "", sort: str = "recent", order: s
     pq = parse_search(q)
     results = [_playlist_public(p, True) for p in store.search_playlists(pq, sort, order)]
     return templates.TemplateResponse(request, "playlists.html", _page_ctx(request, {
+        "playlists": results, "q": q, "sort": sort, "order": order,
+        "stats": store.stats(),
+    }))
+
+
+@app.get("/autogen-playlists", response_class=HTMLResponse)
+def autogen_playlists_page(request: Request, q: str = "", sort: str = "recent", order: str = "desc"):
+    pq = parse_search(q)
+    results = [_playlist_public(p, True) for p in store.search_autogen_playlists(pq, sort, order)]
+    return templates.TemplateResponse(request, "autogen-playlists.html", _page_ctx(request, {
         "playlists": results, "q": q, "sort": sort, "order": order,
         "stats": store.stats(),
     }))
@@ -479,8 +489,18 @@ async def api_audio_thumb_upload(aid: str, thumb: UploadFile = File(...)):
 @app.get("/api/playlists")
 def api_playlists(q: str = "", sort: str = "recent", order: str = "desc",
                   min_songs: int | None = None, max_songs: int | None = None,
-                  min_dur: float | None = None, max_dur: float | None = None):
-    ps = store.search_playlists(parse_search(q), sort, order, min_songs, max_songs, min_dur, max_dur)
+                  min_dur: float | None = None, max_dur: float | None = None,
+                  include_autogen: bool = False):
+    ps = store.search_playlists(parse_search(q), sort, order, min_songs, max_songs, min_dur, max_dur,
+                                include_autogen=include_autogen)
+    return {"results": [_playlist_public(p, True) for p in ps]}
+
+
+@app.get("/api/autogen-playlists")
+def api_autogen_playlists(q: str = "", sort: str = "recent", order: str = "desc",
+                          min_songs: int | None = None, max_songs: int | None = None,
+                          min_dur: float | None = None, max_dur: float | None = None):
+    ps = store.search_autogen_playlists(parse_search(q), sort, order, min_songs, max_songs, min_dur, max_dur)
     return {"results": [_playlist_public(p, True) for p in ps]}
 
 

@@ -64,6 +64,28 @@
     function idxOfId(id) { return opts.tracks.findIndex((t) => t.id === id); }
     function status(msg) { if (els.status) els.status.textContent = "$ " + msg; }
 
+    /* media session: browser media keys + lock screen / notification UI */
+    function setMediaSession(t) {
+      if (!navigator || !navigator.mediaSession) return;
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: t.title || "",
+          artist: t.artist || "",
+          album: t.description || "",
+          artwork: t.thumb_url ? [{ src: t.thumb_url, sizes: "480x480", type: "image/png" }] : [],
+        });
+      } catch (_) {}
+    }
+    function setupMediaSession() {
+      if (!navigator || !navigator.mediaSession) return;
+      try {
+        navigator.mediaSession.setActionHandler("play", () => { audio.play().catch(() => {}); });
+        navigator.mediaSession.setActionHandler("pause", () => { audio.pause(); });
+        navigator.mediaSession.setActionHandler("previoustrack", prev);
+        navigator.mediaSession.setActionHandler("nexttrack", () => { next(true); });
+      } catch (_) {}
+    }
+
     function markDirty() {
       dirty = order.join(",") !== savedOrder.join(",");
       if (els.save) els.save.hidden = !dirty;
@@ -216,6 +238,7 @@
       if (els.nowD) els.nowD.textContent = t.description || "";
       if (els.tDur) els.tDur.textContent = fmt(t.duration_sec);
       document.title = t.title + " // another_ap";
+      setMediaSession(t);
       renderQueue();
       const qi = listEl && listEl.children[pos];
       if (qi) qi.scrollIntoView({ block: "nearest" });
@@ -528,6 +551,7 @@
     markDirty();
     paintVol();
     paintSleep();
+    setupMediaSession();
     load(false);
     return {
       load, next, prev, toggle, save: doSave,

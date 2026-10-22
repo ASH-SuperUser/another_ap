@@ -565,9 +565,31 @@ def sync_autogen_playlists() -> dict:
     return summary
 
 
-def list_playlists() -> list[dict]:
+def list_playlists(include_autogen: bool = False) -> list[dict]:
     with db() as con:
-        prows = _fetchall(con, "SELECT * FROM playlists ORDER BY updated_at DESC")
+        if include_autogen:
+            prows = _fetchall(con, "SELECT * FROM playlists ORDER BY updated_at DESC")
+        else:
+            prows = _fetchall(
+                con, "SELECT * FROM playlists WHERE is_autogen=FALSE ORDER BY updated_at DESC"
+            )
+        out = []
+        for pr in prows:
+            items = _fetchall(
+                con,
+                """SELECT a.* FROM playlist_items pi JOIN audios a ON a.id=pi.audio_id
+                   WHERE pi.playlist_id=? ORDER BY pi.position ASC""",
+                [pr["id"]],
+            )
+            out.append(_row_to_playlist(pr, [_row_to_audio(r) for r in items]))
+    return out
+
+
+def list_autogen_playlists() -> list[dict]:
+    with db() as con:
+        prows = _fetchall(
+            con, "SELECT * FROM playlists WHERE is_autogen=TRUE ORDER BY updated_at DESC"
+        )
         out = []
         for pr in prows:
             items = _fetchall(
@@ -640,9 +662,10 @@ def _playlist_matches(p: dict, pq: ParsedQuery) -> tuple[bool, int]:
 
 def search_playlists(pq: ParsedQuery, sort: str = "recent", order: str = "desc",
                      min_songs: int | None = None, max_songs: int | None = None,
-                     min_dur: float | None = None, max_dur: float | None = None) -> list[dict]:
+                     min_dur: float | None = None, max_dur: float | None = None,
+                     include_autogen: bool = False) -> list[dict]:
     out: list[tuple[int, dict]] = []
-    for p in list_playlists():
+    for p in list_playlists(include_autogen=include_autogen):
         if min_songs is not None and p["count"] < min_songs:
             continue
         if max_songs is not None and p["count"] > max_songs:
@@ -666,6 +689,34 @@ def search_playlists(pq: ParsedQuery, sort: str = "recent", order: str = "desc",
             out.sort(key=lambda x: (x[0], x[1]["updated_at"] or 0), reverse=True if order == "desc" else False)
         else:
             out.sort(key=lambda x: x[1]["updated_at"] or 0, reverse=rev)
+    return [p for _, p in out]
+
+
+def search_autogen_playlists(pq: ParsedQuery, sort: str = "recent", order: str = "desc",
+                             min_songs: int | None = None, max_songs: int | None = None,
+                             min_dur: float | None = None, max_dur: float | None = None) -> list[dict]:
+    out: list[tuple[int, dict]] = []
+    for p in list_autogen_playlists():
+        if min_songs is not None and p["count"] < min_songs:
+            continue
+        if max_songs is not None and p["count"] > max_songs:
+            continue
+        if min_dur is not None and p["total_sec"] < min_dur:
+            continue
+        if max_dur is not None and p["total_sec"] > max_dur:
+            continue
+        ok, score = _playlist_matches(p, pq)
+        if ok:
+            out.append((score, p))
+    rev = order != "asc"
+    if sort == "name":
+        out.sort(key=lambda x: x[1]["title"].lower(), reverse=rev)
+    elif sort == "songs":
+        out.sort(key=lambda x: x[1]["count"], reverse=rev)
+    elif sort == "duration":
+        out.sort(key=lambda x: x[1]["total_sec"], reverse=rev)
+    else:
+        out.sort(key=lambda x: x[1]["updated_at"] or 0, reverse=rev)
     return [p for _, p in out]
 
 
