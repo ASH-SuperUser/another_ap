@@ -85,6 +85,17 @@
         navigator.mediaSession.setActionHandler("nexttrack", () => { next(true); });
       } catch (_) {}
     }
+    function setPositionState() {
+      if (!navigator || !navigator.mediaSession) return;
+      try {
+        const d = audio.duration || (cur() && cur().duration_sec) || 0;
+        navigator.mediaSession.setPositionState({
+          duration: d,
+          playbackRate: audio.playbackRate,
+          position: audio.currentTime,
+        });
+      } catch (_) {}
+    }
 
     function markDirty() {
       dirty = order.join(",") !== savedOrder.join(",");
@@ -501,8 +512,12 @@
         const d = audio.duration || (cur() && cur().duration_sec) || 0;
         els.seek.value = d ? String((audio.currentTime / d) * 1000) : "0";
       }
+      setPositionState();
     });
-    audio.addEventListener("loadedmetadata", () => { if (els.tDur) els.tDur.textContent = fmt(audio.duration); });
+    audio.addEventListener("loadedmetadata", () => {
+      if (els.tDur) els.tDur.textContent = fmt(audio.duration);
+      setPositionState();
+    });
     if (els.seek) {
       els.seek.addEventListener("input", () => {
         const d = audio.duration || (cur() && cur().duration_sec) || 0;

@@ -37,6 +37,7 @@
         {% if p.tags %}<div class="tags">{% for t in p.tags %}<b>#</b>{{ t }} {% endfor %}</div>{% endif %}
         <div class="row-actions">
           <a class="btn" href="{{ p.page_url }}">open</a>
+          <button class="btn" data-edit="{{ p.id }}">edit</button>
         </div>
       </div>
     </article>
@@ -44,6 +45,25 @@
   </div>
   {% else %}<div class="empty">$ no autogen playlists match. tags need {{ config.AUTOGEN_MIN_AUDIOS if config else 5 }}+ tracks to appear. try uploading more tracks with tags.</div>{% endif %}
 </section>
+
+<!-- edit playlist modal -->
+<div id="edit-pl-modal" class="modal" hidden role="dialog" aria-label="edit playlist">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ edit playlist</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <form id="edit-pl-form" class="form-grid">
+        <input type="hidden" name="id">
+        <label>title <input name="title" class="cli" required maxlength="120"></label>
+        <label>description <textarea name="description" class="cli"></textarea></label>
+        <label>tags (; separated) <input name="tags" class="cli"></label>
+        <div class="row-actions" style="margin-top:8px">
+          <button class="btn primary" type="submit">save [enter]</button>
+          <button class="btn" data-close type="button">cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -53,6 +73,33 @@
     if (tag === "INPUT" || tag === "TEXTAREA") return;
     if (e.key === "/") { e.preventDefault(); document.getElementById("f").querySelector("input").focus(); }
   });
+  const editModal = document.getElementById("edit-pl-modal");
+  const editForm = document.getElementById("edit-pl-form");
+  document.querySelectorAll("[data-edit]").forEach((b) => {
+    b.onclick = async () => {
+      const pid = b.dataset.edit;
+      try {
+        const p = await window.apApi("/api/playlists/" + pid);
+        editForm.querySelector("input[name='id']").value = p.id;
+        editForm.querySelector("input[name='title']").value = p.title;
+        editForm.querySelector("textarea[name='description']").value = p.description || "";
+        editForm.querySelector("input[name='tags']").value = (p.tags || []).join(" ; ");
+        editModal.hidden = false;
+        editForm.querySelector("input[name='title']").focus();
+      } catch (err) { window.apToast("load failed: " + err.message); }
+    };
+  });
+  editForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const pid = editForm.querySelector("input[name='id']").value;
+    const fd = new FormData(editForm);
+    const body = { title: fd.get("title"), description: fd.get("description"), tags: fd.get("tags") };
+    try {
+      await window.apApi("/api/playlists/" + pid, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      editModal.hidden = true;
+      location.reload();
+    } catch (err) { window.apToast("save failed: " + err.message); }
+  };
 })();
 </script>
 {% endblock %}

@@ -16,27 +16,17 @@
       <a class="btn" href="{{ track.stream_url }}" download>dl [d]</a>
     </div>
     <div class="hint" id="thumb-note" hidden>$ preview — [r] rolls again, [u] keeps it. nothing saved yet.</div>
-    <form id="edit-form" class="form-grid" hidden style="margin-top:10px">
-      <label>title <input name="title" class="cli" value="{{ track.title }}"></label>
-      <label>artist <input name="artist" class="cli" value="{{ track.artist }}"></label>
-      <label>description <textarea name="description" class="cli">{{ raw.description }}</textarea></label>
-      <label>tags <input name="tags" class="cli" value="{{ track.tags|join(' ; ') }}"></label>
-      <label>cover upload <input type="file" name="thumb" accept="image/*"></label>
-      <div><button class="btn primary" type="submit">save [enter]</button></div>
-    </form>
     <div style="margin-top:10px">
       <h3 style="font-size:12px;color:var(--muted)">$ add to playlist</h3>
-      <form id="pl-form" class="inline-form">
-        <input id="pl-q" class="cli" style="flex:1" placeholder="playlist name or #hash">
-        <button class="btn" type="submit">search</button>
-      </form>
-      <div id="pl-results" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn" id="pl-add-open" style="width:100%">add to playlist</button>
+      <div class="hint" style="margin-top:4px">search all playlists, pick one, add this track</div>
     </div>
     <div class="danger-zone">
       <button class="btn danger" id="au-del">delete track [D]</button>
       <div class="hint">removes file from disk + all playlists.</div>
     </div>
   </aside>
+
   <div>
     <div class="player">
       <div class="now">
@@ -110,6 +100,47 @@
     {% endfor %}
   </div>
 </section>
+
+<!-- edit track modal: title / artist / description / tags -->
+<div id="edit-au-modal" class="modal" hidden role="dialog" aria-label="edit track">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ edit track</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <form id="edit-au-form" class="form-grid">
+        <input type="hidden" name="id" value="{{ track.id }}">
+        <label>title <input name="title" class="cli" required maxlength="120" value="{{ track.title }}"></label>
+        <label>artist <input name="artist" class="cli" value="{{ track.artist }}"></label>
+        <label>description <textarea name="description" class="cli">{{ raw.description }}</textarea></label>
+        <label>tags (; separated) <input name="tags" class="cli" value="{{ track.tags|join(' ; ') }}"></label>
+        <div class="row-actions" style="margin-top:8px">
+          <button class="btn primary" type="submit">save [enter]</button>
+          <button class="btn" data-close type="button">cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- add to playlist modal: full grammar search + add -->
+<div id="add-pl-modal" class="modal" hidden role="dialog" aria-label="add to playlist">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ add to playlist</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <form id="add-pl-search-form" class="inline-form">
+        <input id="add-pl-q" class="cli" style="flex:1;min-width:220px" placeholder="@tags a ; b ; @noti c · @title words · plain text" autocomplete="off">
+        <button class="btn primary" type="submit">search [enter]</button>
+      </form>
+      <p class="hint">same advanced grammar as /playlists · pick a playlist to add this track to</p>
+      <div class="row-actions" style="margin:8px 0">
+        <button class="btn" id="add-pl-all" type="button">all</button>
+        <button class="btn" id="add-pl-none" type="button">none</button>
+        <span class="hint" id="add-pl-count">0 ticked</span>
+        <button class="btn primary" id="add-pl-commit" type="button">add ticked to playlist(s)</button>
+      </div>
+      <div id="add-pl-results" style="display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto"></div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script src="/static/player.js?v=4"></script>
@@ -118,20 +149,112 @@
   const AID = "{{ track.id }}";
   const tracks = [{{ track|tojson }}];
   window.apPlayer({ audio: document.getElementById("audio"), tracks, startIndex: 0 });
-  const ef = document.getElementById("edit-form");
-  const toggleEdit = () => { ef.hidden = !ef.hidden; if (!ef.hidden) ef.querySelector("input").focus(); };
-  document.getElementById("edit-toggle").onclick = toggleEdit;
-  ef.onsubmit = async (e) => {
+  // details edit modal: title/artist/description/tags — opens on edit button [e]
+  const editModal = document.getElementById("edit-au-modal");
+  const editForm = document.getElementById("edit-au-form");
+  document.getElementById("edit-toggle").onclick = () => {
+    editModal.hidden = false;
+    editForm.querySelector("input[name='title']").focus();
+  };
+  editForm.onsubmit = async (e) => {
     e.preventDefault();
-    const fd = new FormData(ef);
-    await window.apApi("/api/audios/" + AID, { method: "PATCH", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ title: fd.get("title"), artist: fd.get("artist"), description: fd.get("description"), tags: fd.get("tags") }) });
-    const f = fd.get("thumb");
-    if (f && f.size) {
-      const m = new FormData(); m.append("thumb", f);
-      await fetch("/api/audios/" + AID + "/thumbnail/upload", { method: "POST", body: m });
-    }
-    location.reload();
+    const fd = new FormData(editForm);
+    const body = { title: fd.get("title"), artist: fd.get("artist"), description: fd.get("description"), tags: fd.get("tags") };
+    try {
+      await window.apApi("/api/audios/" + AID, { method: "PATCH", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(body) });
+      editModal.hidden = true;
+      location.reload();
+    } catch (err) { window.apToast("save failed: " + err.message); }
+  };
+  // add-to-playlist modal: full grammar search + multi-tick add
+  const addPlModal = document.getElementById("add-pl-modal");
+  const addPlBox = document.getElementById("add-pl-results");
+  const addPlCount = document.getElementById("add-pl-count");
+  const tickedPl = new Set();
+  function paintAddPlCount() { addPlCount.textContent = tickedPl.size + " ticked"; }
+  document.getElementById("pl-add-open").onclick = () => {
+    addPlModal.hidden = false;
+    runAddPlSearch(document.getElementById("add-pl-q").value.trim());
+    document.getElementById("add-pl-q").focus();
+  };
+  document.getElementById("add-pl-search-form").onsubmit = (e) => {
+    e.preventDefault();
+    runAddPlSearch(document.getElementById("add-pl-q").value.trim());
+  };
+  async function runAddPlSearch(q) {
+    addPlBox.innerHTML = "<span class='hint'>$ searching…</span>";
+    try {
+      const d = await window.apApi("/api/playlists?q=" + encodeURIComponent(q) + "&sort=recent&order=desc");
+      addPlBox.innerHTML = "";
+      if (!d.results.length) { addPlBox.innerHTML = "<span class='hint'>no match</span>"; return; }
+      d.results.slice(0, 60).forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "add-row";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.className = "q-sel"; cb.checked = tickedPl.has(p.id);
+        cb.dataset.pid = p.id;
+        cb.setAttribute("aria-label", "add to " + p.title);
+        cb.onchange = () => { if (cb.checked) tickedPl.add(p.id); else tickedPl.delete(p.id); paintAddPlCount(); };
+        row.insertBefore(cb, row.firstChild);
+        if (p.thumb_url) {
+          const im = document.createElement("img");
+          im.loading = "lazy"; im.alt = ""; im.width = 56; im.height = 56; im.src = p.thumb_url;
+          row.appendChild(im);
+        } else {
+          const fb = document.createElement("span");
+          fb.className = "no-thumb"; fb.textContent = "~/p"; row.appendChild(fb);
+        }
+        const meta = document.createElement("div");
+        meta.className = "add-meta";
+        const title = document.createElement("div");
+        title.className = "add-title"; title.textContent = p.title;
+        meta.appendChild(title);
+        const art = document.createElement("div");
+        art.className = "add-artist";
+        art.textContent = (p.count || 0) + " tracks · " + (p.total || "--:--") + " · #" + p.id;
+        meta.appendChild(art);
+        if (p.description) {
+          const de = document.createElement("div");
+          de.className = "add-desc"; de.textContent = p.description; meta.appendChild(de);
+        }
+        if (p.tags && p.tags.length) {
+          const tg = document.createElement("div");
+          tg.className = "tags";
+          p.tags.forEach((x, i) => { if (i) tg.appendChild(document.createTextNode(" ")); const b = document.createElement("b"); b.textContent = "#"; tg.appendChild(b); tg.appendChild(document.createTextNode(x)); });
+          meta.appendChild(tg);
+        }
+        if (p.is_autogen) {
+          const ag = document.createElement("span"); ag.className = "hint mark"; ag.textContent = "[auto #" + p.autogen_tag + "]"; meta.appendChild(ag);
+        }
+        row.appendChild(meta);
+        addPlBox.appendChild(row);
+      });
+      paintAddPlCount();
+    } catch (err) { addPlBox.innerHTML = "<span class='hint'>search failed: " + err.message + "</span>"; }
+  }
+  document.getElementById("add-pl-all").onclick = () => {
+    addPlBox.querySelectorAll("input.q-sel").forEach((cb) => { cb.checked = true; tickedPl.add(cb.dataset.pid); });
+    paintAddPlCount();
+  };
+  document.getElementById("add-pl-none").onclick = () => {
+    tickedPl.clear(); addPlBox.querySelectorAll("input.q-sel").forEach((cb) => { cb.checked = false; });
+    paintAddPlCount();
+  };
+  document.getElementById("add-pl-commit").onclick = async () => {
+    const ids = [...tickedPl];
+    if (!ids.length) { window.apToast("tick something first"); return; }
+    let n = 0;
+    try {
+      for (const pid of ids) {
+        await window.apApi("/api/playlists/" + pid + "/add", { method: "POST",
+          headers: {"Content-Type":"application/json"}, body: JSON.stringify({ audio_id: AID }) });
+        n++;
+        if (n < ids.length) window.apToast("added " + n + "/" + ids.length + "…");
+      }
+      addPlModal.hidden = true;
+      location.reload();
+    } catch (err) { window.apToast("add failed after " + n + ": " + err.message); }
   };
   // cover preview-then-keep: roll randoms, keep the one you like
   let previewPath = null;
@@ -167,32 +290,10 @@
     await window.apApi("/api/audios/" + AID, { method: "DELETE" });
     location.href = "/audios";
   };
-  document.getElementById("pl-form").onsubmit = async (e) => {
-    e.preventDefault();
-    const q = document.getElementById("pl-q").value.trim();
-    const box = document.getElementById("pl-results");
-    box.innerHTML = "<span class='hint'>$ searching…</span>";
-    const d = await window.apApi("/api/playlists?q=" + encodeURIComponent(q));
-    box.innerHTML = d.results.length ? "" : "<span class='hint'>no match</span>";
-    d.results.slice(0, 8).forEach((p) => {
-      const row = document.createElement("div");
-      row.className = "q-item";
-      row.innerHTML = "<span class='tt'></span><span class='d'>" + p.count + " tracks</span>";
-      row.querySelector(".tt").textContent = p.title + "  #" + p.id;
-      const add = document.createElement("button");
-      add.className = "btn"; add.textContent = "add";
-      add.onclick = async () => {
-        await window.apApi("/api/playlists/" + p.id + "/add", { method: "POST",
-          headers: {"Content-Type":"application/json"}, body: JSON.stringify({ audio_id: AID }) });
-        window.apToast("added to " + p.title);
-      };
-      row.appendChild(add); box.appendChild(row);
-    });
-  };
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement||{}).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (e.key === "e") toggleEdit();
+    if (e.key === "e") document.getElementById("edit-toggle").click();
     if (e.key === "r") document.getElementById("thumb-random").click();
     if (e.key === "u" && !document.getElementById("thumb-keep").hidden) document.getElementById("thumb-keep").click();
   });

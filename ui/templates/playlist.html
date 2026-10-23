@@ -19,12 +19,6 @@
       <button class="btn" id="edit-toggle">edit [e]</button>
       <button class="btn" id="cover-open">edit cover [c]</button>
     </div>
-    <form id="edit-form" class="form-grid" hidden style="margin-top:10px">
-      <label>title <input name="title" class="cli" value="{{ pl.title }}"></label>
-      <label>description <textarea name="description" class="cli">{{ pl.description }}</textarea></label>
-      <label>tags <input name="tags" class="cli" value="{{ pl.tags|join(' ; ') }}"></label>
-      <div><button class="btn primary" type="submit">save [enter]</button></div>
-    </form>
     <div class="danger-zone">
       <button class="btn danger" id="pl-del">delete playlist [D]</button>
       <div class="hint">tracks stay in library.</div>
@@ -166,6 +160,25 @@
     </div>
   </div>
 </div>
+
+<!-- edit playlist modal: title / description / tags -->
+<div id="edit-pl-modal" class="modal" hidden role="dialog" aria-label="edit playlist">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ edit playlist</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <form id="edit-pl-form" class="form-grid">
+        <input type="hidden" name="id" value="{{ pl.id }}">
+        <label>title <input name="title" class="cli" required maxlength="120" value="{{ pl.title }}"></label>
+        <label>description <textarea name="description" class="cli">{{ pl.description }}</textarea></label>
+        <label>tags (; separated) <input name="tags" class="cli" value="{{ pl.tags|join(' ; ') }}"></label>
+        <div class="row-actions" style="margin-top:8px">
+          <button class="btn primary" type="submit">save [enter]</button>
+          <button class="btn" data-close type="button">cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script src="/static/player.js?v=4"></script>
@@ -190,17 +203,23 @@
       document.getElementById("bulk-count").textContent = ids.length + " selected";
       document.getElementById("bulk-remove").disabled = !ids.length;
     }});
-  // details edit (title/desc/tags) — fields visible only in edit mode
-  const ef = document.getElementById("edit-form");
-  const toggleEdit = () => { ef.hidden = !ef.hidden; if (!ef.hidden) ef.querySelector("input").focus(); };
-  document.getElementById("edit-toggle").onclick = toggleEdit;
-  ef.onsubmit = async (e) => {
+  // details edit modal: title/description/tags — opens on edit button [e]
+  const editModal = document.getElementById("edit-pl-modal");
+  const editForm = document.getElementById("edit-pl-form");
+  document.getElementById("edit-toggle").onclick = () => {
+    editModal.hidden = false;
+    editForm.querySelector("input[name='title']").focus();
+  };
+  editForm.onsubmit = async (e) => {
     e.preventDefault();
-    const fd = new FormData(ef);
+    const fd = new FormData(editForm);
     const body = { title: fd.get("title"), description: fd.get("description"), tags: fd.get("tags") };
-    await window.apApi("/api/playlists/" + PID, { method: "PATCH",
-      headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
-    location.reload();
+    try {
+      await window.apApi("/api/playlists/" + PID, { method: "PATCH",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      editModal.hidden = true;
+      location.reload();
+    } catch (err) { window.apToast("save failed: " + err.message); }
   };
   // ---- bulk tracks edit: tick several, remove at once (drag to reorder, [w] saves) ----
   const bulkBar = document.getElementById("bulk-bar");
@@ -442,7 +461,7 @@
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement||{}).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (e.key === "e") toggleEdit();
+    if (e.key === "e") document.getElementById("edit-toggle").click();
     if (e.key === "a") document.getElementById("add-open").click();
     if (e.key === "E") { if (bulkBar.hidden) setBulk(true); else setBulk(false); }
     if (e.key === "c") openCover();
