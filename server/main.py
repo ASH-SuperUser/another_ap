@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import re
 import time
 
 import config
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -32,6 +33,47 @@ os.makedirs(config.AUDIO_DIR, exist_ok=True)
 os.makedirs(config.THUMB_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 app.mount("/thumbs", StaticFiles(directory=config.THUMB_DIR), name="thumbs")
+
+# ---------------------------------------------------------------- mobile -> phone UI
+_MOBILE_RE = re.compile(
+    r"Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|webOS",
+    re.I,
+)
+_PHONE_MAP = {
+    "/": "/phone/",
+    "/playlists": "/phone/playlists",
+    "/audios": "/phone/audios",
+    "/download": "/phone/download",
+    "/help": "/phone/help",
+}
+
+
+def _phone_target(path: str) -> str | None:
+    if path in _PHONE_MAP:
+        return _PHONE_MAP[path]
+    m = re.match(r"^/a/([^/]+)(/?)$", path)
+    if m:
+        return "/phone/a/" + m.group(1)
+    m = re.match(r"^/p/([^/]+)(/?)$", path)
+    if m:
+        return "/phone/p/" + m.group(1)
+    return None
+
+
+@app.middleware("http")
+async def _mobile_redirect(request: Request, call_next):
+    if request.method not in ("GET", "HEAD"):
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith(("/phone/", "/static/", "/thumbs/", "/api/", "/stream/", "/health")):
+        return await call_next(request)
+    ua = request.headers.get("user-agent", "")
+    if _MOBILE_RE.search(ua):
+        target = _phone_target(path)
+        if target:
+            url = str(request.url).replace(path, target, 1)
+            return RedirectResponse(url, status_code=302)
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -275,6 +317,90 @@ def download_page(request: Request):
 @app.get("/help", response_class=HTMLResponse)
 def help_page(request: Request):
     return templates.TemplateResponse(request, "help.html", _page_ctx(request, {"q": ""}))
+
+
+# ---------------------------------------------------------------- phone UI (same backend APIs)
+@app.get("/phone/", response_class=HTMLResponse)
+def phone_home(request: Request):
+    import random
+
+    audios = [_audio_public(a) for a in store.list_audios()]
+    playlists = [_playlist_public(p) for p in store.list_playlists()]
+    random.shuffle(audios)
+    random.shuffle(playlists)
+    return templates.TemplateResponse(request, "phone/index.html", _page_ctx(request, {
+        "audios": audios[: config.HOME_SUGGEST_N],
+        "playlists": playlists[: config.HOME_SUGGEST_N],
+        "stats": store.stats(), "q": "",
+    }))
+
+
+@app.get("/phone/playlists", response_class=HTMLResponse)
+def phone_playlists_page(request: Request, q: str = "", sort: str = "recent", order: str = "desc"):
+    pq = parse_search(q)
+    results = [_playlist_public(p, True) for p in store.search_playlists(pq, sort, order)]
+    return templates.TemplateResponse(request, "phone/playlists.html", _page_ctx(request, {
+        "playlists": results, "q": q, "sort": sort, "order": order,
+        "stats": store.stats(),
+    }))
+
+
+@app.get("/phone/p/{pid}", response_class=HTMLResponse)
+def phone_playlist_page(request: Request, pid: str):
+    p = store.get_playlist(pid)
+    if not p:
+        raise HTTPException(404, "no such playlist")
+    import random
+    others = [_playlist_public(x) for x in store.list_playlists() if x["id"] != pid]
+    random.shuffle(others)
+    return templates.TemplateResponse(request, "phone/playlist.html", _page_ctx(request, {
+        "pl": _playlist_public(p, True), "raw": p,
+        "others": others[:6], "q": "",
+    }))
+
+
+@app.get("/phone/audios", response_class=HTMLResponse)
+def phone_audios_page(request: Request, q: str = "", sort: str = "recent", order: str = "desc"):
+    pq = parse_search(q)
+    results = [_audio_public(a) for a in store.search_audios(pq, sort, order)]
+    return templates.TemplateResponse(request, "phone/audios.html", _page_ctx(request, {
+        "audios": results, "q": q, "sort": sort, "order": order,
+        "stats": store.stats(),
+    }))
+
+
+@app.get("/phone/a/{aid}", response_class=HTMLResponse)
+def phone_audio_page(request: Request, aid: str):
+    a = store.get_audio(aid)
+    if not a:
+        raise HTTPException(404, "no such audio")
+    import random
+    others = [_audio_public(x) for x in store.list_audios() if x["id"] != aid]
+    random.shuffle(others)
+    return templates.TemplateResponse(request, "phone/audio.html", _page_ctx(request, {
+        "track": _audio_public(a), "raw": a,
+        "others": others[:8], "q": "",
+    }))
+
+
+@app.get("/phone/download", response_class=HTMLResponse)
+def phone_download_page(request: Request):
+    return templates.TemplateResponse(request, "phone/download.html", _page_ctx(request, {"q": ""}))
+
+
+@app.get("/phone/help", response_class=HTMLResponse)
+def phone_help_page(request: Request):
+    return templates.TemplateResponse(request, "phone/help.html", _page_ctx(request, {"q": ""}))
+
+
+@app.get("/phone/autogen-playlists", response_class=HTMLResponse)
+def phone_autogen_playlists_page(request: Request, q: str = "", sort: str = "recent", order: str = "desc"):
+    pq = parse_search(q)
+    results = [_playlist_public(p, True) for p in store.search_autogen_playlists(pq, sort, order)]
+    return templates.TemplateResponse(request, "phone/autogen-playlists.html", _page_ctx(request, {
+        "playlists": results, "q": q, "sort": sort, "order": order,
+        "stats": store.stats(),
+    }))
 
 
 # ---------------------------------------------------------------- streaming (Range support for seeking)

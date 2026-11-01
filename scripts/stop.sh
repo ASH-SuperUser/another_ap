@@ -3,8 +3,8 @@
 # usage: scripts/stop.sh [--port P] [--pid-file F]
 set -e
 cd "$(dirname "$0")/.."
-if [ -x "venv/bin/python" ]; then
-  PY="venv/bin/python"
+if [ -x ".venv-linux/bin/python" ]; then
+  PY=".venv-linux/bin/python"
 elif command -v python3 >/dev/null 2>&1; then
   PY="python3"   # stop.py is stdlib-only; any python works
 else

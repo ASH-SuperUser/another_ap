@@ -5,7 +5,7 @@ Usage (after `git clone`, from repo root or scripts/):
                           [--log-level debug] [--daemon]
 
 What it does:
-  1. finds/creates ./venv (works on Windows + posix, no globals touched)
+  1. finds/creates ./.venv-windows on Windows, ./.venv-linux on posix (no globals touched)
   2. installs ./requirements.txt into it (unless --no-install)
   3. runs the FastAPI server (uvicorn) in the foreground (blocking),
      or detached in the background with --daemon (writes a pid file
@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VENV = os.path.join(ROOT, "venv")
+VENV = os.path.join(ROOT, ".venv-windows" if os.name == "nt" else ".venv-linux")
 REQS = os.path.join(ROOT, "requirements.txt")
 DEFAULT_PID_FILE = os.path.join(ROOT, "data", ".another_ap.pid")
 DEFAULT_LOG_FILE = os.path.join(ROOT, "data", "another_ap.log")
@@ -47,7 +47,7 @@ def ensure_venv() -> str:
     if py != sys.executable and os.path.isfile(py):
         return py
     if not os.path.isdir(VENV):
-        print("$ venv not found — creating ./venv (local only)…")
+        print(f"$ venv not found — creating ./{os.path.basename(VENV)} (local only)…")
         subprocess.check_call([sys.executable, "-m", "venv", VENV])
         py = venv_python()
     return py
@@ -62,7 +62,7 @@ def ensure_deps(py: str) -> None:
     if probe.returncode == 0:
         print("$ deps ok, skipping install")
         return
-    print("$ installing requirements into ./venv (local only)…")
+    print(f"$ installing requirements into ./{os.path.basename(VENV)} (local only)…")
     subprocess.check_call([py, "-m", "pip", "install", "--upgrade", "pip"])
     subprocess.check_call([py, "-m", "pip", "install", "-r", REQS])
 

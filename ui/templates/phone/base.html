@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{ theme.active_name }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="{{ theme.accent }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>{% block title %}{{ app_name }}{% endblock %} // {{ app_name }}</title>
+<link rel="stylesheet" href="/static/phone/style.css?v=3">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<style>
+:root{
+  --bg:{{ theme.bg }}; --panel:{{ theme.panel }}; --fg:{{ theme.fg }};
+  --muted:{{ theme.muted }}; --accent:{{ theme.accent }}; --warn:{{ theme.warn }};
+  --danger:{{ theme.danger }}; --border:{{ theme.border }}; --sel:{{ theme.sel }};
+}
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip" href="#main">skip to content [tab]</a>
+<header class="topbar">
+  <div class="bar-in">
+    <button class="hamburger" id="hamburger" title="menu">☰</button>
+    <a class="logo" href="/phone/" accesskey="h" title="home (g h)">$ {{ app_name }}<span class="blink">_</span></a>
+    <div class="bar-right">
+      <input id="global-search" class="cli" type="text" placeholder="$ search...  ( / to focus )"
+             value="{{ q|default('') }}" autocomplete="off" spellcheck="false"
+             data-home-target="/phone/">
+      <select id="theme-select" class="cli" title="theme (t cycles)">
+        {% for t in themes %}
+        <option value="{{ t.name }}" {% if t.name==theme.active_name %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+      <button id="theme-manage" class="btn sm" title="manage themes">~</button>
+    </div>
+  </div>
+</header>
+
+<!-- slide-out menu panel -->
+<div class="menu-backdrop" id="menu-backdrop"></div>
+<div class="menu" id="menu">
+  <div class="m-head">$ menu</div>
+  <a class="m-item {% if request.url.path == "/" or request.url.path == "/phone/" %}on{% endif %}" href="/phone/">
+    <span>home</span><span class="k">g h</span></a>
+  <a class="m-item {% if request.url.path.startswith("/phone/playlists") %}on{% endif %}" href="/phone/playlists">
+    <span>playlists</span><span class="k">g p</span></a>
+  <a class="m-item {% if request.url.path.startswith("/phone/autogen-playlists") %}on{% endif %}" href="/phone/autogen-playlists">
+    <span>autogen playlists</span></a>
+  <a class="m-item {% if request.url.path.startswith("/phone/audios") %}on{% endif %}" href="/phone/audios">
+    <span>audios</span><span class="k">g a</span></a>
+  <a class="m-item {% if request.url.path.startswith("/phone/download") %}on{% endif %}" href="/phone/download">
+    <span>+ get audio</span><span class="k">g d</span></a>
+  <a class="m-item {% if request.url.path.startswith("/phone/help") %}on{% endif %}" href="/phone/help">
+    <span>help</span><span class="k">?</span></a>
+  <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">theme</label>
+    <select id="theme-select-menu" class="cli" style="width:100%">
+      {% for t in themes %}
+      <option value="{{ t.name }}" {% if t.name==theme.active_name %}selected{% endif %}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div style="margin-top:14px">
+    <button class="btn" id="theme-manage-menu" style="width:100">~ manage themes</button>
+  </div>
+</div>
+
+<main id="main" class="wrap">
+  {% block content %}{% endblock %}
+  <footer class="foot">
+    <span>{{ tagline }}</span><span class="sep">::</span>
+    <span>press <kbd>?</kbd> help</span><span class="sep">::</span>
+    <span>keyboard reachable</span>
+  </footer>
+</main>
+
+<!-- bottom tab nav -->
+<nav class="bottom-nav">
+  <a href="/phone/" {% if request.url.path == "/" or request.url.path == "/phone/" %}class="on"{% endif %}>
+    <span style="font-size:20px">🏠</span><span>home</span></a>
+  <a href="/phone/playlists" {% if request.url.path.startswith("/phone/playlists") %}class="on"{% endif %}>
+    <span style="font-size:20px">📋</span><span>playlists</span></a>
+  <a href="/phone/audios" {% if request.url.path.startswith("/phone/audios") %}class="on"{% endif %}>
+    <span style="font-size:20px">🎵</span><span>audios</span></a>
+  <a href="/phone/download" {% if request.url.path.startswith("/phone/download") %}class="on"{% endif %}>
+    <span style="font-size:20px">⬇</span><span>get</span></a>
+</nav>
+
+<!-- help modal -->
+<div id="help-modal" class="modal" hidden role="dialog" aria-label="help">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ help — keyboard + search</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <pre class="help-pre">GLOBAL
+  /           focus search        ? (shift+/)  this help
+  g h/p/a/d   go home/playlists/audios/download
+  t           cycle theme         esc          close dialog / blur
+PLAYER (playlist + audio pages)
+  space/k     play-pause          j/l  -10s/+10s   arrows  seek/volume
+  n/p         next/prev track     m    mute        [/] speed -/+
+  s/S         local mix / saved mix                o/O song-loop / list-loop
+  z           sleep timer (cycle presets)
+  drag queue tracks to reorder · [w] saves order to server
+  0-9         jump to queue index (playlist)
+LISTS
+  j/k or arrows move between cards, enter opens, e edits (on detail)
+  E bulk track-edit, a add-tracks popup, c cover popup (playlist page)</pre>
+      <pre class="help-pre">SEARCH GRAMMAR  (playlists + audios)
+  hello world              plain: match across title/artist/desc/tags
+  @tags a ; b ; @noti c    only tags a+b, exclude c
+  @title some words         title contains
+  @desc some words          description contains
+  @songs a ; b             playlist has tracks matching a,b (audio: title)
+  @artis a ; b             playlist has artists a,b (audio: artist field)
+  @hash ab12cd             jump by id hash
+  combine: @tags chill ; @noti noisy @artis nina
+  filters on /phone/playlists: sort=name|recent|songs|duration</pre>
+      <p><a href="/phone/help">[open full /phone/help page]</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- theme modal -->
+<div id="theme-modal" class="modal" hidden role="dialog" aria-label="themes">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ themes — server stored</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <div id="theme-list" class="theme-list"></div>
+      <h3 style="margin:10px 0 6px;font-size:14px">$ new theme</h3>
+      <form id="theme-form" class="form-grid">
+        <label>name <input name="name" class="cli" required maxlength="40" placeholder="my-term"></label>
+        <div class="color-grid">
+          <label>bg <input type="color" name="bg" value="#0b0e11"></label>
+          <label>panel <input type="color" name="panel" value="#11151b"></label>
+          <label>fg <input type="color" name="fg" value="#c9d4d8"></label>
+          <label>muted <input type="color" name="muted" value="#6b7885"></label>
+          <label>accent <input type="color" name="accent" value="#46c8a6"></label>
+          <label>warn <input type="color" name="warn" value="#ffbd2e"></label>
+          <label>danger <input type="color" name="danger" value="#ff5f56"></label>
+          <label>border <input type="color" name="border" value="#232b33"></label>
+          <label>sel <input type="color" name="sel" value="#1a2b26"></label>
+        </div>
+        <button class="btn primary full" type="submit">save theme [enter]</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script>window.__ACTIVE_THEME__ = "{{ theme.active_name }}";</script>
+<script src="/static/phone/app.js?v=3"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

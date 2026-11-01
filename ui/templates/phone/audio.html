@@ -1,0 +1,302 @@
+{% extends "phone/base.html" %}
+{% block title %}{{ track.title }}{% endblock %}
+{% block content %}
+<section class="detail">
+  <aside class="side">
+    {% if track.thumb_url %}<img id="au-thumb" src="{{ track.thumb_url }}" alt="cover">{% endif %}
+    <h1>{{ track.title }}</h1>
+    <div class="kv">artist <b>{{ track.artist }}</b> · <b>{{ track.duration }}</b> · {{ track.plays }} plays</div>
+    <div class="kv">id <b>#{{ track.id }}</b></div>
+    <div class="kv">{{ raw.description or "-- no description --" }}</div>
+    <div class="tags">{% for t in track.tags %}<b>#</b>{{ t }} {% endfor %}</div>
+    <div class="row-actions" style="margin-top:8px">
+      <button class="btn" id="edit-toggle">edit [e]</button>
+      <button class="btn" id="thumb-random">cover:preview [r]</button>
+      <button class="btn primary" id="thumb-keep" hidden>keep this cover [u]</button>
+      <a class="btn" href="{{ track.stream_url }}" download>dl [d]</a>
+    </div>
+    <div class="hint" id="thumb-note" hidden>$ preview — [r] rolls again, [u] keeps it. nothing saved yet.</div>
+    <div style="margin-top:10px">
+      <h3 style="font-size:12px;color:var(--muted)">$ add to playlist</h3>
+      <button class="btn full" id="pl-add-open">add to playlist</button>
+      <div class="hint" style="margin-top:4px">search all playlists, pick one, add this track</div>
+    </div>
+    <div class="danger-zone">
+      <button class="btn danger" id="au-del">delete track [D]</button>
+      <div class="hint">removes file from disk + all playlists.</div>
+    </div>
+  </aside>
+
+  <div>
+    <div class="player">
+      <div class="now">
+        <div class="now-meta">
+          <span class="prompt">▶</span>
+          <img id="now-thumb" class="now-thumb" alt="now playing cover" hidden>
+          <div class="grow"><div class="t" id="now-title">--</div><div class="a" id="now-artist">--</div></div>
+          <div class="now-count" id="now-count" title="queue position">--/--</div>
+        </div>
+        <div class="hint" id="now-desc"></div>
+      </div>
+      <audio id="audio" preload="metadata"></audio>
+      <div class="seek-row"><span id="t-cur">0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="seek"><span id="t-dur">--:--</span></div>
+      <div class="transport single">
+        <button class="btn primary" id="btn-play" title="play/pause [space]">play ▶ [space]</button>
+      </div>
+      <div class="toggles">
+        <button class="btn" id="btn-shuffle" hidden></button>
+        <button class="btn" id="btn-loop" title="repeat this song [o]">loop-song [o]:off</button>
+        <input id="loop-n-song" class="cli" type="number" min="1" max="99" value="2" title="song loop count" hidden>
+        <input id="loop-n" class="cli" type="number" min="1" max="99" value="2" hidden>
+        <button class="btn" id="btn-mute" title="mute [m]">mute [m]</button>
+      </div>
+      <div class="p-grid">
+        <div class="p-cell">
+          <span class="p-label">volume</span>
+          <div class="p-inline"><input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="volume"><span class="p-val" id="vol-val">100%</span></div>
+        </div>
+        <div class="p-cell">
+          <span class="p-label">speed <span class="hint">([ ] to step)</span></span>
+          <div class="p-inline">
+            <select id="speed" class="cli" aria-label="speed preset">
+              {% for s in ["0.5","0.75","1","1.25","1.5","1.75","2"] %}
+              <option value="{{ s }}" {% if s=="1" %}selected{% endif %}>{{ s }}x</option>{% endfor %}
+              <option value="custom">custom…</option>
+            </select>
+            <input id="speed-custom" class="cli" type="number" min="0.25" max="3" step="0.05" value="1" aria-label="custom speed" hidden>
+            <button class="btn" id="speed-set" hidden>set</button>
+          </div>
+        </div>
+        <div class="p-cell">
+          <span class="p-label">sleep timer <span class="hint">(z to cycle)</span></span>
+          <div class="p-inline">
+            <select id="sleep" class="cli" aria-label="sleep preset">
+              <option value="0">off</option><option value="15">15m</option>
+              <option value="30">30m</option><option value="45">45m</option>
+              <option value="60">60m</option><option value="90">90m</option>
+              <option value="120">120m</option><option value="custom">custom…</option>
+            </select>
+            <input id="sleep-custom" class="cli" type="number" min="1" max="480" step="1" placeholder="min" aria-label="custom sleep minutes" hidden>
+            <button class="btn" id="sleep-set" hidden>set</button>
+            <span class="hint" id="sleep-left"></span>
+          </div>
+        </div>
+      </div>
+      <div class="p-status" id="p-status">$ idle</div>
+      <div class="queue" id="queue" hidden></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>more ~/audios</h2><span class="right"><a href="/phone/audios">[all]</a></span></div>
+  <div class="grid">
+    {% for t in others %}
+    <article class="card">
+      {% if t.thumb_url %}<a href="{{ t.page_url | replace('/a/', '/phone/a/') }}"><img class="thumb" src="{{ t.thumb_url }}" alt="" loading="lazy"></a>{% endif %}
+      <div class="card-body"><div class="card-title"><a href="{{ t.page_url | replace('/a/', '/phone/a/') }}">{{ t.title }}</a></div>
+      <div class="meta">{{ t.artist }} · {{ t.duration }}</div></div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- edit track modal: title / artist / description / tags -->
+<div id="edit-au-modal" class="modal" hidden role="dialog" aria-label="edit track">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ edit track</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <form id="edit-au-form" class="form-grid">
+        <input type="hidden" name="id" value="{{ track.id }}">
+        <label>title <input name="title" class="cli" required maxlength="120" value="{{ track.title }}"></label>
+        <label>artist <input name="artist" class="cli" value="{{ track.artist }}"></label>
+        <label>description <textarea name="description" class="cli">{{ raw.description }}</textarea></label>
+        <label>tags (; separated) <input name="tags" class="cli" value="{{ track.tags|join(' ; ') }}"></label>
+        <div class="row-actions" style="margin-top:8px">
+          <button class="btn primary full" type="submit">save [enter]</button>
+          <button class="btn" data-close type="button">cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- add to playlist modal: full grammar search + add -->
+<div id="add-pl-modal" class="modal" hidden role="dialog" aria-label="add to playlist">
+  <div class="modal-box">
+    <div class="modal-head"><span>$ add to playlist</span><button class="btn" data-close>esc[x]</button></div>
+    <div class="modal-body">
+      <form id="add-pl-search-form" class="inline-form">
+        <input id="add-pl-q" class="cli" style="flex:1;min-width:220px" placeholder="@tags a ; b ; @noti c · @title words · plain text" autocomplete="off">
+        <button class="btn primary" type="submit">search [enter]</button>
+      </form>
+      <p class="hint">same advanced grammar as /phone/playlists · pick a playlist to add this track to</p>
+      <div class="row-actions" style="margin:8px 0">
+        <button class="btn" id="add-pl-all" type="button">all</button>
+        <button class="btn" id="add-pl-none" type="button">none</button>
+        <span class="hint" id="add-pl-count">0 ticked</span>
+        <button class="btn primary" id="add-pl-commit" type="button">add ticked to playlist(s)</button>
+      </div>
+      <div id="add-pl-results" style="display:flex;flex-direction:column;gap:6px;max-height:44vh;overflow:auto"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/phone/player.js?v=1"></script>
+<script>
+(function(){
+  const AID = "{{ track.id }}";
+  const tracks = [{{ track|tojson }}];
+  window.apPlayer({ audio: document.getElementById("audio"), tracks, startIndex: 0 });
+  // details edit modal: title/artist/description/tags — opens on edit button [e]
+  const editModal = document.getElementById("edit-au-modal");
+  const editForm = document.getElementById("edit-au-form");
+  document.getElementById("edit-toggle").onclick = () => {
+    editModal.hidden = false;
+    editForm.querySelector("input[name='title']").focus();
+  };
+  editForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(editForm);
+    const body = { title: fd.get("title"), artist: fd.get("artist"), description: fd.get("description"), tags: fd.get("tags") };
+    try {
+      await window.apApi("/api/audios/" + AID, { method: "PATCH", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(body) });
+      editModal.hidden = true;
+      location.reload();
+    } catch (err) { window.apToast("save failed: " + err.message); }
+  };
+  // add-to-playlist modal: full grammar search + multi-tick add
+  const addPlModal = document.getElementById("add-pl-modal");
+  const addPlBox = document.getElementById("add-pl-results");
+  const addPlCount = document.getElementById("add-pl-count");
+  const tickedPl = new Set();
+  function paintAddPlCount() { addPlCount.textContent = tickedPl.size + " ticked"; }
+  document.getElementById("pl-add-open").onclick = () => {
+    addPlModal.hidden = false;
+    runAddPlSearch(document.getElementById("add-pl-q").value.trim());
+    document.getElementById("add-pl-q").focus();
+  };
+  document.getElementById("add-pl-search-form").onsubmit = (e) => {
+    e.preventDefault();
+    runAddPlSearch(document.getElementById("add-pl-q").value.trim());
+  };
+  async function runAddPlSearch(q) {
+    addPlBox.innerHTML = "<span class='hint'>$ searching…</span>";
+    try {
+      const d = await window.apApi("/api/playlists?q=" + encodeURIComponent(q) + "&sort=recent&order=desc");
+      addPlBox.innerHTML = "";
+      if (!d.results.length) { addPlBox.innerHTML = "<span class='hint'>no match</span>"; return; }
+      d.results.slice(0, 60).forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "add-row";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.className = "q-sel"; cb.checked = tickedPl.has(p.id);
+        cb.dataset.pid = p.id;
+        cb.setAttribute("aria-label", "add to " + p.title);
+        cb.onchange = () => { if (cb.checked) tickedPl.add(p.id); else tickedPl.delete(p.id); paintAddPlCount(); };
+        row.insertBefore(cb, row.firstChild);
+        if (p.thumb_url) {
+          const im = document.createElement("img");
+          im.loading = "lazy"; im.alt = ""; im.width = 48; im.height = 48; im.src = p.thumb_url;
+          row.appendChild(im);
+        } else {
+          const fb = document.createElement("span");
+          fb.className = "no-thumb"; fb.textContent = "~/p"; row.appendChild(fb);
+        }
+        const meta = document.createElement("div");
+        meta.className = "add-meta";
+        const title = document.createElement("div");
+        title.className = "add-title"; title.textContent = p.title;
+        meta.appendChild(title);
+        const art = document.createElement("div");
+        art.className = "add-artist";
+        art.textContent = (p.count || 0) + " tracks · " + (p.total || "--:--") + " · #" + p.id;
+        meta.appendChild(art);
+        if (p.description) {
+          const de = document.createElement("div");
+          de.className = "add-desc"; de.textContent = p.description; meta.appendChild(de);
+        }
+        if (p.tags && p.tags.length) {
+          const tg = document.createElement("div");
+          tg.className = "tags";
+          p.tags.forEach((x, i) => { if (i) tg.appendChild(document.createTextNode(" ")); const b = document.createElement("b"); b.textContent = "#"; tg.appendChild(b); tg.appendChild(document.createTextNode(x)); });
+          meta.appendChild(tg);
+        }
+        if (p.is_autogen) {
+          const ag = document.createElement("span"); ag.className = "hint mark"; ag.textContent = "[auto #" + p.autogen_tag + "]"; meta.appendChild(ag);
+        }
+        row.appendChild(meta);
+        addPlBox.appendChild(row);
+      });
+      paintAddPlCount();
+    } catch (err) { addPlBox.innerHTML = "<span class='hint'>search failed: " + err.message + "</span>"; }
+  }
+  document.getElementById("add-pl-all").onclick = () => {
+    addPlBox.querySelectorAll("input.q-sel").forEach((cb) => { cb.checked = true; tickedPl.add(cb.dataset.pid); });
+    paintAddPlCount();
+  };
+  document.getElementById("add-pl-none").onclick = () => {
+    tickedPl.clear(); addPlBox.querySelectorAll("input.q-sel").forEach((cb) => { cb.checked = false; });
+    paintAddPlCount();
+  };
+  document.getElementById("add-pl-commit").onclick = async () => {
+    const ids = [...tickedPl];
+    if (!ids.length) { window.apToast("tick something first"); return; }
+    let n = 0;
+    try {
+      for (const pid of ids) {
+        await window.apApi("/api/playlists/" + pid + "/add", { method: "POST",
+          headers: {"Content-Type":"application/json"}, body: JSON.stringify({ audio_id: AID }) });
+        n++;
+        if (n < ids.length) window.apToast("added " + n + "/" + ids.length + "…");
+      }
+      addPlModal.hidden = true;
+      location.reload();
+    } catch (err) { window.apToast("add failed after " + n + ": " + err.message); }
+  };
+  // cover preview-then-keep: roll randoms, keep the one you like
+  let previewPath = null;
+  const seenPreviews = [];
+  const coverImg = document.getElementById("au-thumb");
+  const keepBtn = document.getElementById("thumb-keep");
+  const noteEl = document.getElementById("thumb-note");
+  document.getElementById("thumb-random").onclick = async () => {
+    try {
+      const d = await window.apApi("/api/preview-thumbnail", { method: "POST",
+        headers: {"Content-Type":"application/json"}, body: "{}" });
+      previewPath = d.thumb_path;
+      seenPreviews.push(d.thumb_path);
+      if (coverImg) coverImg.src = d.thumb_url;
+      keepBtn.hidden = false;
+      noteEl.hidden = false;
+      window.apToast("preview #" + seenPreviews.length + " — [r] again, [u] keep");
+    } catch (err) { window.apToast("preview failed: " + err.message); }
+  };
+  keepBtn.onclick = async () => {
+    if (!previewPath) return;
+    try {
+      await window.apApi("/api/audios/" + AID, { method: "PATCH",
+        headers: {"Content-Type":"application/json"}, body: JSON.stringify({ thumb_path: previewPath }) });
+      await window.apApi("/api/preview-cleanup", { method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ paths: seenPreviews.filter((p) => p !== previewPath) }) });
+      location.reload();
+    } catch (err) { window.apToast("keep failed: " + err.message); }
+  };
+  document.getElementById("au-del").onclick = async () => {
+    if (!confirm("delete this track?")) return;
+    await window.apApi("/api/audios/" + AID, { method: "DELETE" });
+    location.href = "/phone/audios";
+  };
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement||{}).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (e.key === "e") document.getElementById("edit-toggle").click();
+    if (e.key === "r") document.getElementById("thumb-random").click();
+    if (e.key === "u" && !document.getElementById("thumb-keep").hidden) document.getElementById("thumb-keep").click();
+  });
+})();
+</script>
+{% endblock %}
