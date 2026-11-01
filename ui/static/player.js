@@ -27,6 +27,7 @@
     //        playlistId?, removable?, reorderable?, onRemove?, onTrack?,
     //        onPersistOrder?(ids)->Promise, onDirty?(dirty)}
     const audio = opts.audio;
+    audio.preload = "auto";
     const listEl = $("#queue");
     const canReorder = !!opts.reorderable && (opts.tracks || []).length > 1;
     let order = (opts.tracks || []).map((_, i) => i); // live play order (indices)
@@ -42,6 +43,7 @@
     let dragFrom = -1;
     let selectMode = false;
     const selected = new Set(); // track indices (into opts.tracks) ticked in bulk-edit
+    let wasPlaying = false, pendingResume = false, screenOff = false; // background / screen-off resume state
     window.apPlayerActive = true;
 
     const els = {
@@ -255,7 +257,7 @@
       if (qi) qi.scrollIntoView({ block: "nearest" });
       status("loaded: " + t.title + (passNum > 1 ? "  (pass #" + passNum + ")" : ""));
       if (autoplay) {
-        audio.play().catch(() => { setPlayBtn(false); });
+        audio.play().then(() => { pendingResume = false; setPlayBtn(true); }).catch(() => { setPlayBtn(false); pendingResume = true; });
         // count a playlist play per track start (server no-ops in low disk mode)
         if (opts.playlistId && window.apApi) {
           try {
@@ -503,9 +505,9 @@
     };
     if (els.speedSet) els.speedSet.onclick = () => applySpeed(currentSpeed());
     if (els.vol) els.vol.oninput = () => { audio.volume = parseFloat(els.vol.value); audio.muted = false; if (els.mute) els.mute.classList.remove("on"); paintVol(); };
-    audio.addEventListener("play", () => setPlayBtn(true));
+    audio.addEventListener("play", () => { setPlayBtn(true); pendingResume = false; });
     audio.addEventListener("pause", () => setPlayBtn(false));
-    audio.addEventListener("ended", () => next(true));
+    audio.addEventListener("ended", () => { next(true); if (audio.paused) pendingResume = true; });
     audio.addEventListener("timeupdate", () => {
       if (els.tCur) els.tCur.textContent = fmt(audio.currentTime);
       if (els.seek && document.activeElement !== els.seek) {
@@ -524,6 +526,40 @@
         if (d) audio.currentTime = (parseFloat(els.seek.value) / 1000) * d;
       });
     }
+
+    /* ---- background / screen-off resilience (mobile) ----
+       mobile browsers suspend audio + timers when the screen locks.
+       remember whether we were playing, and resume on unlock / foreground. */
+    function resumePlayback() {
+      if (!pendingResume) return;
+      const t = cur();
+      if (!t) { pendingResume = false; return; }
+      if (audio.ended || audio.paused) {
+        if (order.length && pos < order.length) {
+          audio.play().then(() => { pendingResume = false; setPlayBtn(true); setPositionState(); })
+            .catch(() => { pendingResume = true; });
+        } else {
+          pendingResume = false;
+        }
+      } else {
+        pendingResume = false;
+      }
+    }
+    function onVisible() {
+      screenOff = false;
+      if (pendingResume || (wasPlaying && audio.paused)) resumePlayback();
+      setPositionState();
+    }
+    function onHidden() {
+      wasPlaying = !audio.paused;
+      screenOff = true;
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") onVisible(); else onHidden();
+    });
+    window.addEventListener("pagehide", onHidden);
+    window.addEventListener("pageshow", onVisible);
+    window.addEventListener("resume", onVisible);
 
     /* keyboard (player owns keys when not typing) */
     document.addEventListener("keydown", (e) => {
